@@ -1,4 +1,5 @@
 import axios from "axios";
+import { storage } from "../utils/storage";
 
 const api = axios.create({
   baseURL: "http://localhost:5051/api", // adjust to your backend
@@ -6,7 +7,7 @@ const api = axios.create({
 
 // Later when you add JWT:
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("token");
+  const token = storage.getItem("token");
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }

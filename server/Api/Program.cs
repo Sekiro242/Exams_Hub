@@ -4,6 +4,7 @@ using Microsoft.IdentityModel.Tokens;
 using QuizesApi.Models;
 using QuizesApi.Repositories;
 using QuizesApi.Repositories.Interfaces;
+using QuizesApi.Repositories.Implementation;
 using System;
 using System.Text;
 
@@ -47,6 +48,15 @@ namespace QuizesApi
                 };
             });
 
+            // Add authorization policies for role-based access
+            builder.Services.AddAuthorization(options =>
+            {
+                options.AddPolicy("StudentOnly", policy => policy.RequireRole("Student"));
+                options.AddPolicy("TeacherOnly", policy => policy.RequireRole("Teacher"));
+                options.AddPolicy("SuperadminOnly", policy => policy.RequireRole("Superadmin", "Admin"));
+                options.AddPolicy("TeacherOrAdmin", policy => policy.RequireRole("Teacher", "Superadmin", "Admin"));
+            });
+
             // Add CORS
             builder.Services.AddCors(options =>
             {
@@ -62,6 +72,7 @@ namespace QuizesApi
             // Dependency Injection for Repositories
             builder.Services.AddScoped<IExamRepo, ExamRepo>();
             builder.Services.AddScoped<IQuestionBankRepo, QuestionBankRepo>();
+            builder.Services.AddScoped<IDashboardRepo, DashboardRepo>();
 
             var app = builder.Build();
 

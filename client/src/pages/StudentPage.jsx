@@ -7,13 +7,15 @@ import ProfilePage from '../components/ProfilePage'
 import UserProfile from '../components/UserProfile'
 import QuizInterface from '../components/QuizInterface'
 import ErrorBoundary from '../components/ErrorBoundary'
+import UnifiedDashboard from '../components/UnifiedDashboard'
 import api from '../api/axios'
+import { storage } from '../utils/storage'
 
 export default function StudentPage() {
   const navigate = useNavigate()
 
   // State management
-  const [currentSection, setCurrentSection] = useState('available')
+  const [currentSection, setCurrentSection] = useState('dashboard')
   const [currentSubject, setCurrentSubject] = useState(null)
   const [currentQuiz, setCurrentQuiz] = useState(null)
   const [currentExam, setCurrentExam] = useState(null)
@@ -110,8 +112,8 @@ export default function StudentPage() {
         setLoading(true)
         setError(null)
 
-        // Get user ID from token
-        const token = localStorage.getItem('token')
+        // Get user ID from storage
+        const token = storage.getItem('token')
         let userId = null
         if (token) {
           try {
@@ -208,11 +210,8 @@ export default function StudentPage() {
     }
     showModal('Confirm Logout', 'Are you sure you want to logout?').then((confirmed) => {
       if (confirmed) {
-        // Clear all tokens and user state
-        localStorage.removeItem('token')
-        localStorage.removeItem('userRole')
-        // Clear any other user-related data
-        localStorage.clear()
+        // Clear all session data
+        storage.clear()
         // Reset state
         setCurrentExam(null)
         setIsExamActive(false)
@@ -261,7 +260,7 @@ export default function StudentPage() {
     return `${minutes}m`
   }
 
-  function startExam(exam) {
+  async function startExam(exam) {
     if (isExamActive) {
       showModal('Exam in Progress', 'Please complete your current exam before starting a new one.')
       return
@@ -273,31 +272,95 @@ export default function StudentPage() {
       return
     }
 
-    // Shuffle questions for randomization
-    const shuffleArray = (array) => {
-      const shuffled = [...array]
-      for (let i = shuffled.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+    try {
+      setLoading(true)
+      // Get user ID from token
+      const token = storage.getItem('token')
+      let userId = null
+      if (token) {
+        try {
+          const payload = JSON.parse(atob(token.split('.')[1]))
+          userId = payload.sub || payload.id
+        } catch (e) {
+          console.error('Error parsing token:', e)
+        }
       }
-      return shuffled
+
+      if (!userId) {
+        showModal('Error', 'Unable to identify user. Please log in again.')
+        return
+      }
+
+      // Fetch detailed exam with questions
+      const response = await api.get(`/studentexamanswer/student/${userId}/exam/${exam.examId || exam.id}`)
+      const examData = response.data
+
+      // Map raw questions to the structure QuizInterface expects
+      const mappedQuestions = (examData.questions || []).map(q => {
+        const options = [q.optionA, q.optionB, q.optionC, q.optionD].filter(Boolean)
+        const type = options.length === 4 ? 'mcq' : options.length === 2 ? 'tf' : 'fill'
+
+        let correct = q.correctAnswer
+
+        if (type === 'mcq') {
+          // Map letter answers (A, B, C, D) to indices for MCQs
+          if (typeof q.correctAnswer === 'string' && q.correctAnswer.length === 1 && q.correctAnswer.match(/[A-D]/i)) {
+            correct = q.correctAnswer.toUpperCase().charCodeAt(0) - 65 // A=0, B=1, etc.
+          } else {
+            const idx = options.findIndex(opt => opt === q.correctAnswer)
+            if (idx >= 0) correct = idx
+          }
+        } else if (type === 'tf') {
+          // Normalize to boolean
+          correct = String(q.correctAnswer).toLowerCase().trim() === 'true'
+        }
+
+        return {
+          id: q.questionId,
+          question: q.questionTitle,
+          type: type,
+          options: options,
+          correct: correct,
+          marks: q.mark || 1
+        }
+      })
+
+      // Shuffle questions for randomization
+      const shuffleArray = (array) => {
+        const shuffled = [...array]
+        for (let i = shuffled.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+        }
+        return shuffled
+      }
+
+      const randomizedExam = {
+        id: examData.examId,
+        name: examData.title,
+        subject: examData.examSubject,
+        duration: examData.duration || 60,
+        startDate: examData.startDate,
+        endDate: examData.endDate,
+        questions: shuffleArray(mappedQuestions)
+      }
+
+      setCurrentExam(randomizedExam)
+      setIsExamActive(true)
+      setCurrentSection('quiz')
+
+      // Calculate time remaining
+      const now = new Date()
+      const endDate = new Date(examData.endDate)
+      const timeRemainingMs = endDate.getTime() - now.getTime()
+      setTimeRemaining(Math.max(0, Math.floor(timeRemainingMs / 1000)))
+
+    } catch (err) {
+      console.error('Error starting exam:', err)
+      showModal('Error', 'Failed to load exam questions. Please try again.')
+    } finally {
+      setLoading(false)
     }
-
-    // Create exam with randomized questions
-    const randomizedExam = {
-      ...exam,
-      questions: shuffleArray(exam.questions || [])
-    }
-
-    setCurrentExam(randomizedExam)
-    setIsExamActive(true)
-    setCurrentSection('exam')
-
-    // Calculate time remaining
-    const now = new Date()
-    const endDate = new Date(exam.deadline || exam.endDate)
-    const timeRemainingMs = endDate.getTime() - now.getTime()
-    setTimeRemaining(Math.max(0, Math.floor(timeRemainingMs / 1000)))
   }
 
   function autoSubmitExam() {
@@ -309,7 +372,7 @@ export default function StudentPage() {
 
     try {
       // Get user ID from token
-      const token = localStorage.getItem('token')
+      const token = storage.getItem('token')
       let userId = null
       if (token) {
         try {
@@ -326,7 +389,7 @@ export default function StudentPage() {
       }
 
       // Collect answers from the form
-      const form = document.getElementById('exam-form')
+      const form = document.getElementById('quiz-form')
       // If auto-submitting and form is missing (e.g. tab closed), we might need a fallback
       // But usually the component is still mounted.
 
@@ -429,12 +492,7 @@ export default function StudentPage() {
   }, [currentExam])
 
   function showSection(section) {
-    if (isExamActive && section !== 'exam' && !isReviewMode) {
-      showModal('Exam in Progress', 'Please complete your current exam before navigating away.')
-      return false
-    }
     setCurrentSection(section)
-    return true
   }
 
   function showSubject(subject) {
@@ -449,8 +507,9 @@ export default function StudentPage() {
 
   async function reviewExam(exam) {
     try {
+      setLoading(true)
       // Fetch detailed exam with answers
-      const token = localStorage.getItem('token')
+      const token = storage.getItem('token')
       let userId = null
       if (token) {
         try {
@@ -461,62 +520,69 @@ export default function StudentPage() {
         }
       }
 
-      if (userId) {
-        const response = await api.get(`/studentexamanswer/student/${userId}/exam/${exam.id}`)
-        const examData = response.data
+      if (!userId) {
+        showModal('Error', 'Unable to identify user. Please log in again.')
+        return
+      }
 
-        const questions = (examData.questions || []).map(q => {
-          const options = [q.optionA, q.optionB, q.optionC, q.optionD].filter(Boolean)
+      const response = await api.get(`/studentexamanswer/student/${userId}/exam/${exam.examId || exam.id}`)
+      const examData = response.data
 
-          // Fix: Map letter answers (A, B, C, D) to indices
-          let correctIndex = -1
-          if (q.correctAnswer && q.correctAnswer.length === 1 && q.correctAnswer.match(/[A-D]/i)) {
-            correctIndex = q.correctAnswer.toUpperCase().charCodeAt(0) - 65 // A=0, B=1, etc.
+      const mappedQuestions = (examData.questions || []).map(q => {
+        const options = [q.optionA, q.optionB, q.optionC, q.optionD].filter(Boolean)
+        const type = options.length === 4 ? 'mcq' : options.length === 2 ? 'tf' : 'fill'
+
+        let correct = q.correctAnswer
+        let userAnswer = q.userAnswer
+
+        if (type === 'mcq') {
+          // Map letter answers (A, B, C, D) to indices
+          if (typeof q.correctAnswer === 'string' && q.correctAnswer.length === 1 && q.correctAnswer.match(/[A-D]/i)) {
+            correct = q.correctAnswer.toUpperCase().charCodeAt(0) - 65
           } else {
-            // Fallback for full text match
-            correctIndex = options.findIndex(opt => opt === q.correctAnswer)
+            const idx = options.findIndex(opt => opt === q.correctAnswer)
+            if (idx >= 0) correct = idx
           }
 
-          const userAnswerIndex = options.findIndex(opt => opt === q.userAnswer)
-
-          return {
-            id: q.questionId,
-            question: q.questionTitle,
-            type: options.length === 4 ? 'mcq' : options.length === 2 ? 'tf' : 'fill',
-            options: options,
-            correct: correctIndex >= 0 ? correctIndex : q.correctAnswer,
-            userAnswer: userAnswerIndex >= 0 ? userAnswerIndex : q.userAnswer,
-            isCorrect: q.isCorrect,
-            marks: q.mark || 1
-          }
-        })
-
-        const reviewExam = {
-          id: examData.examId,
-          name: examData.title,
-          subject: examData.examSubject,
-          deadline: examData.endDate,
-          score: examData.score || 0,
-          totalMarks: examData.totalMarks || 0,
-          earnedMarks: examData.earnedMarks || 0,
-          questions: questions
+          const uIdx = options.findIndex(opt => opt === q.userAnswer)
+          if (uIdx >= 0) userAnswer = uIdx
+        } else if (type === 'tf') {
+          // Normalize to boolean
+          correct = String(q.correctAnswer).toLowerCase().trim() === 'true'
+          userAnswer = String(q.userAnswer).toLowerCase().trim() === 'true'
         }
 
-        setCurrentExam(reviewExam)
-        setIsReviewMode(true)
-        setCurrentSection('exam')
-      } else {
-        // Fallback to exam data if no userId
-        setCurrentExam(exam)
-        setIsReviewMode(true)
-        setCurrentSection('exam')
+        return {
+          id: q.questionId,
+          question: q.questionTitle,
+          type: type,
+          options: options,
+          correct: correct,
+          userAnswer: userAnswer,
+          isCorrect: q.isCorrect,
+          marks: q.mark || 1
+        }
+      })
+
+      const reviewExamData = {
+        id: examData.examId,
+        name: examData.title,
+        subject: examData.examSubject,
+        deadline: examData.endDate,
+        score: examData.score || 0,
+        totalMarks: examData.totalMarks || 0,
+        earnedMarks: examData.earnedMarks || 0,
+        questions: mappedQuestions
       }
+
+      setCurrentExam(reviewExamData)
+      setIsReviewMode(true)
+      setCurrentSection('quiz')
     } catch (err) {
       console.error('Error fetching exam details:', err)
-      // Fallback to exam data
-      setCurrentExam(exam)
-      setIsReviewMode(true)
-      setCurrentSection('exam')
+      showModal('Error', 'Failed to load exam details for review. Please try again.')
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -604,19 +670,18 @@ export default function StudentPage() {
     return { available, completed }
   }, [exams, completedExams])
 
-  if (loading) {
-    return (
-      <div className="dashboard-container" style={{ display: 'flex', minHeight: '100vh' }}>
-        <Sidebar
-          isQuizActive={isExamActive}
-          currentSection={currentSection}
-          showSection={showSection}
-          handleLogout={handleLogout}
-          setCurrentSection={setCurrentSection}
-          setIsReviewMode={setIsReviewMode}
-          userRole="Student"
-        />
-        <div className="main-content" style={{ padding: '2rem', background: 'var(--bg-surface)', minHeight: '100vh' }}>
+  return (
+    <div className="dashboard-container" style={{ display: 'flex', minHeight: '100vh' }}>
+      <Sidebar
+        isExamActive={isExamActive}
+        currentSection={currentSection}
+        showSection={showSection}
+        handleLogout={handleLogout}
+        userRole="Student"
+      />
+
+      <div className="main-content">
+        {loading ? (
           <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
             <div style={{ marginBottom: '2rem' }}>
               <div style={{
@@ -698,328 +763,319 @@ export default function StudentPage() {
               ))}
             </div>
           </div>
-        </div>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="dashboard-container" style={{ display: 'flex', minHeight: '100vh' }}>
-        <Sidebar
-          isQuizActive={isExamActive}
-          currentSection={currentSection}
-          showSection={showSection}
-          handleLogout={handleLogout}
-          setCurrentSection={setCurrentSection}
-          setIsReviewMode={setIsReviewMode}
-          userRole="Student"
-        />
-        <div className="main-content" style={{ padding: '2rem', background: '#f9fafb', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ textAlign: 'center' }}>
-            <div style={{
-              width: '48px',
-              height: '48px',
-              fill: '#ef4444',
-              margin: '0 auto 1rem'
-            }}>
-              <svg viewBox="0 0 24 24">
-                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
-              </svg>
-            </div>
-            <h3 style={{ color: '#ef4444', marginBottom: '0.5rem' }}>Error Loading Exams</h3>
-            <p style={{ color: '#6b7280', marginBottom: '1rem' }}>{error}</p>
-            <button
-              onClick={() => window.location.reload()}
-              style={{
-                padding: '0.5rem 1rem',
-                background: '#3b82f6',
-                color: 'white',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: 'pointer'
-              }}
-            >
-              Try Again
-            </button>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="dashboard-container" style={{ display: 'flex', minHeight: '100vh' }}>
-      <Sidebar
-        isQuizActive={isExamActive}
-        currentSection={currentSection}
-        showSection={showSection}
-        handleLogout={handleLogout}
-        setCurrentSection={setCurrentSection}
-        setIsReviewMode={setIsReviewMode}
-        userRole="Student"
-      />
-
-      <div className="main-content">
-        {/* Profile Section */}
-        {currentSection === 'profile' && (
-          <UserProfile
-            userRole="Student"
-            onBack={() => showSection('available')}
-          />
-        )}
-
-        {/* Dashboard View */}
-        {currentSection === 'available' && (
-          <div style={{ padding: '2rem', background: 'var(--bg-surface)', minHeight: '100vh' }}>
-            <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-              <div className="content-header" style={{ marginBottom: '2rem' }}>
-                <h1 style={{ fontSize: '2rem', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <svg style={{ width: '32px', height: '32px', fill: 'var(--primary)' }} viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" /></svg>
-                  Available Exams
-                </h1>
-                <p style={{ fontSize: '1rem', color: 'var(--text-secondary)', margin: 0 }}>
-                  Select an exam to start. Good luck!
-                </p>
+        ) : error ? (
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '60vh' }}>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{
+                width: '48px',
+                height: '48px',
+                fill: '#ef4444',
+                margin: '0 auto 1rem'
+              }}>
+                <svg viewBox="0 0 24 24">
+                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
+                </svg>
               </div>
-
-              {exams.length === 0 ? (
-                <div style={{
-                  background: 'var(--bg-main)',
-                  borderRadius: '16px',
-                  padding: '4rem 2rem',
-                  textAlign: 'center',
-                  boxShadow: 'var(--shadow-sm)'
-                }}>
-                  <svg style={{ width: '80px', height: '80px', fill: 'var(--text-light)', margin: '0 auto 1.5rem' }} viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" /></svg>
-                  <h3 style={{ fontSize: '1.5rem', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
-                    No exams available
-                  </h3>
-                  <p style={{ fontSize: '1rem', color: 'var(--text-secondary)', margin: 0 }}>
-                    There are no exams available at the moment. Check back later!
-                  </p>
-                </div>
-              ) : (
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
-                  gap: '1.5rem'
-                }}>
-                  {exams.map((exam) => {
-                    const timeUntil = getTimeUntilDeadline(exam.deadline || exam.endDate)
-                    return (
-                      <div
-                        key={exam.examId}
-                        className="exam-card"
-                        style={{
-                          background: 'var(--bg-main)',
-                          borderRadius: 'var(--radius-lg)',
-                          padding: '1.5rem',
-                          boxShadow: 'var(--shadow-md)',
-                          borderLeft: '4px solid var(--primary)',
-                          transition: 'all var(--transition-base)',
-                          cursor: 'pointer',
-                          position: 'relative',
-                          overflow: 'hidden'
-                        }}
-                        onClick={() => startExam(exam)}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.transform = 'translateY(-4px)'
-                          e.currentTarget.style.boxShadow = 'var(--shadow-xl)'
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.transform = 'translateY(0)'
-                          e.currentTarget.style.boxShadow = 'var(--shadow-md)'
-                        }}
-                      >
-                        {/* Random Questions Badge */}
-                        <div style={{
-                          position: 'absolute',
-                          top: '1rem',
-                          right: '1rem',
-                          background: 'linear-gradient(135deg, var(--accent), var(--primary))',
-                          color: 'white',
-                          padding: '0.25rem 0.75rem',
-                          borderRadius: 'var(--radius-full)',
-                          fontSize: '0.75rem',
-                          fontWeight: '700',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '0.25rem',
-                          boxShadow: 'var(--shadow-sm)'
-                        }}>
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z" />
-                          </svg>
-                          Randomized
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem', marginTop: '1.5rem' }}>
-                          <div>
-                            <h3 style={{ fontSize: '1.25rem', fontWeight: '700', color: 'var(--text-primary)', margin: '0 0 0.5rem 0' }}>{exam.title}</h3>
-                            <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', margin: 0 }}>{exam.examSubject || 'General'}</p>
-                          </div>
-                          <div style={{ background: 'var(--primary-light)', color: 'var(--primary)', padding: '0.25rem 0.75rem', borderRadius: '999px', fontSize: '0.75rem', fontWeight: '700' }}>
-                            {exam.questions ? exam.questions.length : 0} Qs
-                          </div>
-                        </div>
-
-                        <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '1.5rem', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                          {exam.examDescription}
-                        </p>
-
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z" /><path d="M12.5 7H11v6l5.25 3.15.75-1.23-4.5-2.67z" /></svg>
-                            {timeUntil ? `Ends in ${timeUntil}` : 'Ends soon'}
-                          </div>
-                          <button style={{
-                            background: 'var(--primary)',
-                            color: 'white',
-                            border: 'none',
-                            padding: '0.5rem 1.25rem',
-                            borderRadius: '8px',
-                            fontWeight: '600',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.5rem'
-                          }}>
-                            Start <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
-                          </button>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
+              <h3 style={{ color: '#ef4444', marginBottom: '0.5rem' }}>Error Loading Exams</h3>
+              <p style={{ color: '#6b7280', marginBottom: '1rem' }}>{error}</p>
+              <button
+                onClick={() => window.location.reload()}
+                style={{
+                  padding: '0.5rem 1rem',
+                  background: 'var(--accent-primary)',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer'
+                }}
+              >
+                Try Again
+              </button>
             </div>
           </div>
-        )}
+        ) : (
+          <>
 
-        {/* Completed Exams */}
-        {currentSection === 'completed' && (
-          <div style={{ padding: '2rem', background: 'var(--bg-surface)', minHeight: '100vh' }}>
-            <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-              <div className="content-header" style={{ marginBottom: '2rem' }}>
-                <h1 style={{ fontSize: '2rem', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <svg style={{ width: '32px', height: '32px', fill: 'var(--success)' }} viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" /></svg>
-                  Completed Exams
-                </h1>
-                <p style={{ fontSize: '1rem', color: 'var(--text-secondary)', margin: 0 }}>
-                  Review your past performance and scores.
-                </p>
-              </div>
+            {/* Dashboard Section */}
+            {currentSection === 'dashboard' && (
+              <UnifiedDashboard
+                userRole="Student"
+                userId={(() => {
+                  const token = storage.getItem('token')
+                  if (token) {
+                    try {
+                      const payload = JSON.parse(atob(token.split('.')[1]))
+                      return payload.sub || payload.id
+                    } catch (e) {
+                      console.error('Error parsing token:', e)
+                    }
+                  }
+                  return null
+                })()}
+              />
+            )}
 
-              {completedExams.length === 0 ? (
-                <div style={{
-                  background: 'var(--bg-main)',
-                  borderRadius: '16px',
-                  padding: '4rem 2rem',
-                  textAlign: 'center',
-                  boxShadow: 'var(--shadow-sm)'
-                }}>
-                  <svg style={{ width: '80px', height: '80px', fill: 'var(--text-light)', margin: '0 auto 1.5rem' }} viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" /></svg>
-                  <h3 style={{ fontSize: '1.5rem', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
-                    No Completed Exams
-                  </h3>
-                  <p style={{ fontSize: '1rem', color: 'var(--text-secondary)', margin: 0 }}>
-                    You haven't completed any exams yet. Check the Available Exams section to get started!
-                  </p>
-                </div>
-              ) : (
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
-                  gap: '1.5rem'
-                }}>
-                  {completedExams.map((exam) => (
-                    <div
-                      key={exam.examId}
-                      className="exam-card"
-                      style={{
-                        background: 'var(--bg-main)',
-                        borderRadius: '16px',
-                        padding: '1.5rem',
-                        boxShadow: 'var(--shadow-md)',
-                        borderLeft: '4px solid var(--success)',
-                        transition: 'transform 0.2s ease, box-shadow 0.2s ease',
-                        cursor: 'pointer'
-                      }}
-                      onClick={() => reviewExam(exam)}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.transform = 'translateY(-4px)'
-                        e.currentTarget.style.boxShadow = 'var(--shadow-lg)'
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.transform = 'translateY(0)'
-                        e.currentTarget.style.boxShadow = 'var(--shadow-md)'
-                      }}
-                    >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
-                        <div>
-                          <h3 style={{ fontSize: '1.25rem', fontWeight: '700', color: 'var(--text-primary)', margin: '0 0 0.5rem 0' }}>{exam.title}</h3>
-                          <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', margin: 0 }}>{exam.examSubject || 'General'}</p>
-                        </div>
-                        <div style={{ background: 'var(--success-bg)', color: 'var(--success)', padding: '0.25rem 0.75rem', borderRadius: '999px', fontSize: '0.75rem', fontWeight: '700' }}>
-                          {Math.round((exam.score || 0) * 100) / 100}%
-                        </div>
-                      </div>
+            {/* Profile Section */}
+            {currentSection === 'profile' && (
+              <UserProfile
+                userRole="Student"
+                onBack={() => showSection('available')}
+              />
+            )}
 
-                      <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '1.5rem', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                        {exam.examDescription}
+            {/* Dashboard View */}
+            {currentSection === 'available' && (
+              <div style={{ padding: '2rem', background: 'var(--bg-surface)', minHeight: '100vh' }}>
+                <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
+                  <div className="content-header" style={{ marginBottom: '2rem' }}>
+                    <h1 style={{ fontSize: '2rem', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                      <svg style={{ width: '32px', height: '32px', fill: 'var(--primary)' }} viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" /></svg>
+                      Available Exams
+                    </h1>
+                    <p style={{ fontSize: '1rem', color: 'var(--text-secondary)', margin: 0 }}>
+                      Select an exam to start. Good luck!
+                    </p>
+                  </div>
+
+                  {exams.length === 0 ? (
+                    <div style={{
+                      background: 'var(--bg-main)',
+                      borderRadius: '16px',
+                      padding: '4rem 2rem',
+                      textAlign: 'center',
+                      boxShadow: 'var(--shadow-sm)'
+                    }}>
+                      <svg style={{ width: '80px', height: '80px', fill: 'var(--text-light)', margin: '0 auto 1.5rem' }} viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" /></svg>
+                      <h3 style={{ fontSize: '1.5rem', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
+                        No exams available
+                      </h3>
+                      <p style={{ fontSize: '1rem', color: 'var(--text-secondary)', margin: 0 }}>
+                        There are no exams available at the moment. Check back later!
                       </p>
-
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" /></svg>
-                          Completed
-                        </div>
-                        <button style={{
-                          background: 'var(--bg-surface)',
-                          color: 'var(--text-primary)',
-                          border: '1px solid var(--border-color)',
-                          padding: '0.5rem 1.25rem',
-                          borderRadius: '8px',
-                          fontWeight: '600',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '0.5rem'
-                        }}>
-                          Review <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z" /></svg>
-                        </button>
-                      </div>
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
+                  ) : (
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+                      gap: '1.5rem'
+                    }}>
+                      {exams.map((exam) => {
+                        const timeUntil = getTimeUntilDeadline(exam.deadline || exam.endDate)
+                        return (
+                          <div
+                            key={exam.examId}
+                            className="exam-card"
+                            style={{
+                              background: 'var(--bg-main)',
+                              borderRadius: 'var(--radius-lg)',
+                              padding: '1.5rem',
+                              boxShadow: 'var(--shadow-md)',
+                              borderLeft: '4px solid var(--primary)',
+                              transition: 'all var(--transition-base)',
+                              cursor: 'pointer',
+                              position: 'relative',
+                              overflow: 'hidden'
+                            }}
+                            onClick={() => startExam(exam)}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.transform = 'translateY(-4px)'
+                              e.currentTarget.style.boxShadow = 'var(--shadow-xl)'
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.transform = 'translateY(0)'
+                              e.currentTarget.style.boxShadow = 'var(--shadow-md)'
+                            }}
+                          >
+                            {/* Random Questions Badge */}
+                            <div style={{
+                              position: 'absolute',
+                              top: '1rem',
+                              right: '1rem',
+                              background: 'linear-gradient(135deg, var(--accent), var(--primary))',
+                              color: 'white',
+                              padding: '0.25rem 0.75rem',
+                              borderRadius: 'var(--radius-full)',
+                              fontSize: '0.75rem',
+                              fontWeight: '700',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '0.25rem',
+                              boxShadow: 'var(--shadow-sm)'
+                            }}>
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z" />
+                              </svg>
+                              Randomized
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem', marginTop: '1.5rem' }}>
+                              <div>
+                                <h3 style={{ fontSize: '1.25rem', fontWeight: '700', color: 'var(--text-primary)', margin: '0 0 0.5rem 0' }}>{exam.title}</h3>
+                                <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', margin: 0 }}>{exam.examSubject || 'General'}</p>
+                              </div>
+                              <div style={{ background: 'var(--primary-light)', color: 'var(--primary)', padding: '0.25rem 0.75rem', borderRadius: '999px', fontSize: '0.75rem', fontWeight: '700' }}>
+                                {exam.questions ? exam.questions.length : 0} Qs
+                              </div>
+                            </div>
 
-        {/* Quiz Interface */}
-        {currentSection === 'quiz' && currentQuiz && (
-          <QuizInterface
-            currentQuiz={currentQuiz}
-            isReviewMode={isReviewMode}
-            formatTimerDisplay={(seconds) => {
-              const hours = Math.floor(seconds / 3600)
-              const minutes = Math.floor((seconds % 3600) / 60)
-              const secs = seconds % 60
-              if (hours > 0) {
-                return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
-              }
-              return `${minutes}:${secs.toString().padStart(2, '0')}`
-            }}
-            timeRemaining={timeRemaining}
-            submitQuiz={submitQuiz}
-            backToDashboard={isReviewMode ? backToCompleted : () => {
-              setIsQuizActive(false)
-              setCurrentSection('available')
-              setCurrentQuiz(null)
-              setTimeRemaining(0)
-            }}
-          />
+                            <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '1.5rem', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                              {exam.examDescription}
+                            </p>
+
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z" /><path d="M12.5 7H11v6l5.25 3.15.75-1.23-4.5-2.67z" /></svg>
+                                {timeUntil ? `Ends in ${timeUntil}` : 'Ends soon'}
+                              </div>
+                              <button style={{
+                                background: 'var(--primary)',
+                                color: 'white',
+                                border: 'none',
+                                padding: '0.5rem 1.25rem',
+                                borderRadius: '8px',
+                                fontWeight: '600',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.5rem'
+                              }}>
+                                Start <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
+                              </button>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Completed Exams */}
+            {currentSection === 'completed' && (
+              <div style={{ padding: '2rem', background: 'var(--bg-surface)', minHeight: '100vh' }}>
+                <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
+                  <div className="content-header" style={{ marginBottom: '2rem' }}>
+                    <h1 style={{ fontSize: '2rem', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                      <svg style={{ width: '32px', height: '32px', fill: 'var(--success)' }} viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" /></svg>
+                      Completed Exams
+                    </h1>
+                    <p style={{ fontSize: '1rem', color: 'var(--text-secondary)', margin: 0 }}>
+                      Review your past performance and scores.
+                    </p>
+                  </div>
+
+                  {completedExams.length === 0 ? (
+                    <div style={{
+                      background: 'var(--bg-main)',
+                      borderRadius: '16px',
+                      padding: '4rem 2rem',
+                      textAlign: 'center',
+                      boxShadow: 'var(--shadow-sm)'
+                    }}>
+                      <svg style={{ width: '80px', height: '80px', fill: 'var(--text-light)', margin: '0 auto 1.5rem' }} viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" /></svg>
+                      <h3 style={{ fontSize: '1.5rem', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
+                        No Completed Exams
+                      </h3>
+                      <p style={{ fontSize: '1rem', color: 'var(--text-secondary)', margin: 0 }}>
+                        You haven't completed any exams yet. Check the Available Exams section to get started!
+                      </p>
+                    </div>
+                  ) : (
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+                      gap: '1.5rem'
+                    }}>
+                      {completedExams.map((exam) => (
+                        <div
+                          key={exam.examId}
+                          className="exam-card"
+                          style={{
+                            background: 'var(--bg-main)',
+                            borderRadius: '16px',
+                            padding: '1.5rem',
+                            boxShadow: 'var(--shadow-md)',
+                            borderLeft: '4px solid var(--success)',
+                            transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+                            cursor: 'pointer'
+                          }}
+                          onClick={() => reviewExam(exam)}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.transform = 'translateY(-4px)'
+                            e.currentTarget.style.boxShadow = 'var(--shadow-lg)'
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.transform = 'translateY(0)'
+                            e.currentTarget.style.boxShadow = 'var(--shadow-md)'
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
+                            <div>
+                              <h3 style={{ fontSize: '1.25rem', fontWeight: '700', color: 'var(--text-primary)', margin: '0 0 0.5rem 0' }}>{exam.title}</h3>
+                              <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', margin: 0 }}>{exam.examSubject || 'General'}</p>
+                            </div>
+                            <div style={{ background: 'var(--success-bg)', color: 'var(--success)', padding: '0.25rem 0.75rem', borderRadius: '999px', fontSize: '0.75rem', fontWeight: '700' }}>
+                              {Math.round((exam.score || 0) * 100) / 100}%
+                            </div>
+                          </div>
+
+                          <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '1.5rem', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                            {exam.examDescription}
+                          </p>
+
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" /></svg>
+                              Completed
+                            </div>
+                            <button style={{
+                              background: 'var(--bg-surface)',
+                              color: 'var(--text-primary)',
+                              border: '1px solid var(--border-color)',
+                              padding: '0.5rem 1.25rem',
+                              borderRadius: '8px',
+                              fontWeight: '600',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '0.5rem'
+                            }}>
+                              Review <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z" /></svg>
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Quiz Interface */}
+            {currentSection === 'quiz' && currentExam && (
+              <QuizInterface
+                currentQuiz={currentExam}
+                isReviewMode={isReviewMode}
+                formatTimerDisplay={(seconds) => {
+                  const hours = Math.floor(seconds / 3600)
+                  const minutes = Math.floor((seconds % 3600) / 60)
+                  const secs = seconds % 60
+                  if (hours > 0) {
+                    return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+                  }
+                  return `${minutes}:${secs.toString().padStart(2, '0')}`
+                }}
+                timeRemaining={timeRemaining}
+                submitQuiz={submitExam}
+                backToDashboard={isReviewMode ? backToCompleted : () => {
+                  setIsExamActive(false)
+                  setCurrentSection('available')
+                  setCurrentExam(null)
+                  setTimeRemaining(0)
+                }}
+              />
+            )}
+          </>
         )}
       </div>
 

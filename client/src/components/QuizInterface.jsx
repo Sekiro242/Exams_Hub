@@ -14,7 +14,7 @@ export default function QuizInterface({
 
   // Helper function to render rich text (markdown-like to HTML)
   const renderRichText = (text) => {
-    if (!text) return ''
+    if (!text) return { __html: '' }
     let html = text
     // Convert markdown-like formatting to HTML
     html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')

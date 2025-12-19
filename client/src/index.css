@@ -98,17 +98,29 @@ button {
 }
 
 /* Styles from StudentPage.css, SuperAdminPage.jsx, and StudentDetailsPage.jsx, now global */
+/* Dashboard layout foundation */
 .dashboard-container {
   display: flex;
-  height: 100vh
+  min-height: 100vh;
+  background: var(--bg-surface);
 }
 
 .main-content {
-  margin-left: 280px;
   flex: 1;
-  overflow: auto;
-  min-height: 100vh
+  padding: 2rem;
+  overflow-y: auto;
+  position: relative;
+  background: var(--bg-surface);
 }
+
+/* Ensure mobile responsiveness handles margin correctly */
+@media (min-width: 769px) {
+  .main-content {
+    margin-left: 0;
+    /* Sidebar is sticky/fixed, but we'll let flexbox handle it if possible, or use padding */
+  }
+}
+
 
 .modal-overlay {
   position: fixed;
@@ -264,143 +276,10 @@ button {
   border-color: var(--text-secondary);
 }
 
-.sidebar {
-  width: 280px;
-  background: linear-gradient(180deg, #7f1d1d 0%, #991b1b 100%);
-  color: white;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 4px 0 20px rgba(0, 0, 0, .1);
-  transition: all .3s ease;
-  height: 100vh;
-  position: fixed;
-  left: 0;
-  top: 0;
-  z-index: 1000
-}
-
-.sidebar.locked {
-  pointer-events: none;
-  opacity: .5;
-  animation: shake .5s ease-in-out;
-  cursor: not-allowed;
-}
-
-.sidebar-header {
-  padding: 2rem 1.5rem;
-  text-align: center;
-  border-bottom: 1px solid rgba(255, 255, 255, .1)
-}
-
-.profile-section {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1rem
-}
-
-.profile-picture {
-  width: 80px;
-  height: 80px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #dc2626, #ef4444);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 2rem;
-  font-weight: 600;
-  border: 4px solid rgba(255, 255, 255, .2);
-  box-shadow: 0 4px 15px rgba(0, 0, 0, .2);
-  cursor: pointer;
-  transition: all .3s ease
-}
-
-.profile-picture:hover {
-  transform: scale(1.05);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, .3)
-}
-
-.profile-info h3 {
-  font-size: 1.1rem;
-  font-weight: 600;
-  margin-bottom: .25rem
-}
-
-.profile-info p {
-  font-size: .875rem;
-  opacity: .8
-}
-
-.sidebar-divider {
-  height: 1px;
-  background: rgba(255, 255, 255, .2);
-  margin: 1.5rem 1rem
-}
-
-.sidebar-nav {
-  flex: 1;
-  padding: 0 1rem;
-  overflow-y: auto
-}
-
-.sidebar-footer {
-  padding: 0 1rem 1rem;
-  margin-top: auto
-}
-
-.nav-item {
-  margin-bottom: .5rem
-}
-
-.nav-button {
-  width: 100%;
-  padding: 1rem 1.25rem;
-  background: transparent;
-  border: none;
-  color: rgba(255, 255, 255, .8);
-  text-align: left;
-  border-radius: 12px;
-  font-size: 1rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all .3s ease;
-  display: flex;
-  align-items: center;
-  gap: .75rem
-}
-
-.nav-button:hover {
-  background: rgba(255, 255, 255, .1);
-  color: white;
-  transform: translateX(4px)
-}
-
-.nav-button.active {
-  background: rgba(255, 255, 255, .15);
-  color: white;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, .2)
-}
-
-.logout-btn {
-  background: rgba(220, 38, 38, .2) !important;
-  border: 1px solid rgba(220, 38, 38, .3) !important
-}
-
-.logout-btn:hover {
-  background: rgba(220, 38, 38, .3) !important;
-  border-color: rgba(220, 38, 38, .5) !important;
-  transform: translateX(4px)
-}
-
-.nav-icon {
-  width: 20px;
-  height: 20px;
-  fill: currentColor
-}
 
 .main-content {
   flex: 1;
-  padding: 2rem;
+  padding: 1rem 2rem;
   overflow-y: auto;
   position: relative
 }
@@ -413,6 +292,7 @@ button {
   filter: blur(4px);
   pointer-events: none
 }
+
 
 .quiz-overlay {
   position: fixed;
@@ -451,7 +331,7 @@ button {
 }
 
 .content-header {
-  margin-bottom: 2rem;
+  margin-bottom: 1rem;
   display: flex;
   align-items: center;
   justify-content: space-between
@@ -2791,8 +2671,8 @@ button {
 
   /* SuperAdmin Page Styles */
   .content-header {
-    margin-bottom: 2rem;
-    padding: 2rem;
+    margin-bottom: 1rem;
+    padding: 1rem 1.5rem;
     background: white;
     border-radius: 16px;
     box-shadow: 0 4px 18px rgba(0, 0, 0, .06);

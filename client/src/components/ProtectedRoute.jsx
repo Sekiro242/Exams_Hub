@@ -1,7 +1,8 @@
 import { Navigate } from 'react-router-dom'
+import { storage } from '../utils/storage'
 
 export default function ProtectedRoute({ children, allowedRoles }) {
-    const token = localStorage.getItem('token')
+    const token = storage.getItem('token')
 
     // If no token, redirect to login
     if (!token) {
@@ -28,9 +29,9 @@ export default function ProtectedRoute({ children, allowedRoles }) {
             const role = payload['http://schemas.microsoft.com/ws/2008/06/identity/claims/role']
             userRoles = Array.isArray(role) ? role.map(r => String(r).toLowerCase()) : [String(role).toLowerCase()]
         }
-        // Fallback to localStorage
+        // Fallback to storage utility
         else {
-            const storedRole = localStorage.getItem('userRole')
+            const storedRole = storage.getItem('userRole')
             if (storedRole) {
                 userRoles = [String(storedRole).toLowerCase()]
             }

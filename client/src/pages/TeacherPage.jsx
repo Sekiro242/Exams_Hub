@@ -8,7 +8,9 @@ import Sidebar from '../components/Sidebar'
 import DashboardView from '../components/DashboardView'
 import QuizModal from '../components/QuizModal'
 import ErrorBoundary from '../components/ErrorBoundary'
+import UnifiedDashboard from '../components/UnifiedDashboard'
 import api from '../api/axios.js'
+import { storage } from '../utils/storage'
 
 export default function TeacherPage() {
   const navigate = useNavigate()
@@ -50,16 +52,16 @@ export default function TeacherPage() {
   const modalResolveRef = useRef(null)
 
   useEffect(() => {
-    const isSuperAdmin = localStorage.getItem('isSuperAdminView')
+    const isSuperAdmin = storage.getItem('isSuperAdminView')
     if (isSuperAdmin === 'true') {
       setIsSuperAdminView(true)
-      const teacherData = localStorage.getItem('selectedTeacherData')
+      const teacherData = storage.getItem('selectedTeacherData')
       if (teacherData) {
         setSelectedTeacherData(JSON.parse(teacherData))
       }
       // Clear the flag after loading
-      localStorage.removeItem('isSuperAdminView')
-      localStorage.removeItem('selectedTeacherData')
+      storage.removeItem('isSuperAdminView')
+      storage.removeItem('selectedTeacherData')
     }
   }, [])
 
@@ -150,8 +152,8 @@ export default function TeacherPage() {
 
   // Authentication & Authorization
   useEffect(() => {
-    const token = localStorage.getItem('token')
-    const storedUserRole = localStorage.getItem('userRole')
+    const token = storage.getItem('token')
+    const storedUserRole = storage.getItem('userRole')
     setUserRole(storedUserRole)
 
     if (!token) {
@@ -210,11 +212,8 @@ export default function TeacherPage() {
   const handleLogout = () => {
     showModal('Confirm Logout', 'Are you sure you want to logout?').then((confirmed) => {
       if (confirmed) {
-        // Clear all tokens and user state
-        localStorage.removeItem('token')
-        localStorage.removeItem('userRole')
-        // Clear any other user-related data
-        localStorage.clear()
+        // Clear all session data
+        storage.clear()
         // Reset state
         setCurrentSection('main')
         setCurrentQuizId(null)
@@ -505,7 +504,7 @@ export default function TeacherPage() {
       startDate,
       endDate: datetime,
       questionIds: currentQuizQuestions.map(q => q.id).filter(Boolean),
-      createdBy: (() => { try { const t = localStorage.getItem('token'); if (!t) return 0; const payload = JSON.parse(atob(t.split('.')[1] || '')); return Number(payload.sub) || 0; } catch { return 0; } })()
+      createdBy: (() => { try { const t = storage.getItem('token'); if (!t) return 0; const payload = JSON.parse(atob(t.split('.')[1] || '')); return Number(payload.sub) || 0; } catch { return 0; } })()
     }
 
     try {
@@ -776,7 +775,7 @@ export default function TeacherPage() {
         // Extract accountId from token once
         let accountId = 0;
         try {
-          const token = localStorage.getItem('token');
+          const token = storage.getItem('token');
           if (token) {
             const payload = JSON.parse(atob(token.split('.')[1] || ''));
             accountId = Number(payload.sub) || 0;
@@ -826,7 +825,7 @@ export default function TeacherPage() {
         // Extract accountId from token once
         let accountId = 0;
         try {
-          const token = localStorage.getItem('token');
+          const token = storage.getItem('token');
           if (token) {
             const payload = JSON.parse(atob(token.split('.')[1] || ''));
             accountId = Number(payload.sub) || 0;
@@ -1036,70 +1035,21 @@ export default function TeacherPage() {
     switch (currentSection) {
       case 'main':
         return (
-          <div id="dashboard-view" style={{ padding: '2rem', background: 'var(--bg-surface)', minHeight: '100vh' }}>
-            <div className="content-header" style={{ marginBottom: '2rem' }}>
-              <h1 className="content-title" style={{ display: 'flex', alignItems: 'center', gap: '.75rem', fontSize: '2rem', fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 .5rem 0' }}>
-                <svg className="title-icon" style={{ width: '32px', height: '32px', fill: 'var(--primary)' }} viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8v-6h-8v10zm0-18v6h8V3h-8z" /></svg>
-                Dashboard Overview
-              </h1>
-              <p className="content-subtitle" style={{ fontSize: '1rem', color: 'var(--text-secondary)', margin: 0 }}>
-                {isSuperAdminView && selectedTeacherData
-                  ? `Viewing ${selectedTeacherData.name}'s dashboard (${selectedTeacherData.subject} Teacher)`
-                  : `Welcome back, ${teacherName}`}
-              </p>
-            </div>
-
-            <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
-              <div className="stat-card" style={{ background: 'var(--bg-main)', padding: '1.5rem', borderRadius: '16px', boxShadow: 'var(--shadow-md)', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                <div className="stat-icon-wrapper" style={{ width: '48px', height: '48px', borderRadius: '12px', background: 'var(--primary-light)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--primary)' }}>
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" /></svg>
-                </div>
-                <div>
-                  <h3 style={{ fontSize: '1.5rem', fontWeight: '700', color: 'var(--text-primary)', margin: 0 }}>{quizzes.length}</h3>
-                  <p style={{ color: 'var(--text-secondary)', margin: 0, fontSize: '0.875rem' }}>Active Exams</p>
-                </div>
-              </div>
-              <div className="stat-card" style={{ background: 'var(--bg-main)', padding: '1.5rem', borderRadius: '16px', boxShadow: 'var(--shadow-md)', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                <div className="stat-icon-wrapper" style={{ width: '48px', height: '48px', borderRadius: '12px', background: 'var(--success-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--success)' }}>
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" /></svg>
-                </div>
-                <div>
-                  <h3 style={{ fontSize: '1.5rem', fontWeight: '700', color: 'var(--text-primary)', margin: 0 }}>{students.length}</h3>
-                  <p style={{ color: 'var(--text-secondary)', margin: 0, fontSize: '0.875rem' }}>Total Students</p>
-                </div>
-              </div>
-              <div className="stat-card" style={{ background: 'var(--bg-main)', padding: '1.5rem', borderRadius: '16px', boxShadow: 'var(--shadow-md)', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                <div className="stat-icon-wrapper" style={{ width: '48px', height: '48px', borderRadius: '12px', background: 'var(--warning-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--warning)' }}>
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" /></svg>
-                </div>
-                <div>
-                  <h3 style={{ fontSize: '1.5rem', fontWeight: '700', color: 'var(--text-primary)', margin: 0 }}>{questionBanks.length}</h3>
-                  <p style={{ color: 'var(--text-secondary)', margin: 0, fontSize: '0.875rem' }}>Question Banks</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="recent-section">
-              <h2 style={{ fontSize: '1.25rem', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '1rem' }}>Recent Activity</h2>
-              <div className="activity-list" style={{ background: 'var(--bg-main)', borderRadius: '16px', padding: '1.5rem', boxShadow: 'var(--shadow-md)' }}>
-                {quizzes.slice(0, 3).map(quiz => (
-                  <div key={quiz.id} style={{ display: 'flex', alignItems: 'center', padding: '1rem 0', borderBottom: '1px solid var(--border-color)' }}>
-                    <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: 'var(--bg-surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: '1rem', color: 'var(--text-secondary)' }}>
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z" /></svg>
-                    </div>
-                    <div>
-                      <h4 style={{ margin: '0 0 0.25rem 0', color: 'var(--text-primary)' }}>{quiz.title}</h4>
-                      <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Created on {new Date(quiz.created).toLocaleDateString()}</p>
-                    </div>
-                    <div style={{ marginLeft: 'auto' }}>
-                      <span style={{ padding: '0.25rem 0.75rem', borderRadius: '999px', background: 'var(--success-bg)', color: 'var(--success)', fontSize: '0.75rem', fontWeight: '600' }}>Active</span>
-                    </div>
-                  </div>
-                ))}
-                {quizzes.length === 0 && <p style={{ color: 'var(--text-secondary)', textAlign: 'center', padding: '2rem' }}>No recent activity</p>}
-              </div>
-            </div>
-          </div>
+          <UnifiedDashboard
+            userRole="Teacher"
+            userId={(() => {
+              const token = storage.getItem('token')
+              if (token) {
+                try {
+                  const payload = JSON.parse(atob(token.split('.')[1]))
+                  return payload.sub || payload.id
+                } catch (e) {
+                  console.error('Error parsing token:', e)
+                }
+              }
+              return null
+            })()}
+          />
         )
       case 'my-quizzes':
         return (
@@ -1816,20 +1766,16 @@ export default function TeacherPage() {
 
   return (
     <ErrorBoundary>
-      <div className="dashboard-container">
+      <div className="dashboard-container" style={{ display: 'flex', minHeight: '100vh' }}>
         <Sidebar
-          isQuizActive={false}
+          isExamActive={activeQuizSession !== null}
           currentSection={currentSection}
           showSection={showSection}
           handleLogout={handleLogout}
-          setCurrentSection={setCurrentSection}
-          setIsReviewMode={() => { }}
           userRole={userRole || 'Teacher'}
         />
-        <div className="main-content">
-          <div className="content-container">
-            {currentView}
-          </div>
+        <div className="main-content" style={{ flex: 1, overflowY: 'auto' }}>
+          {currentView}
         </div>
 
         {/* Modal */}

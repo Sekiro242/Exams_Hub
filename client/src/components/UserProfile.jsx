@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import api from '../api/axios'
+import { storage } from '../utils/storage'
 
 export default function UserProfile({ userRole, onBack }) {
   const [userData, setUserData] = useState(null)
@@ -16,9 +17,9 @@ export default function UserProfile({ userRole, onBack }) {
   // Parse user data from JWT token
   const parseUserFromToken = () => {
     try {
-      const token = localStorage.getItem('token')
+      const token = storage.getItem('token')
       if (!token) return null
-      
+
       const payload = JSON.parse(atob(token.split('.')[1]))
       return {
         id: payload.sub,
@@ -124,12 +125,12 @@ export default function UserProfile({ userRole, onBack }) {
     return (
       <div className="profile-page" style={{ padding: '2rem', background: '#f9fafb', minHeight: '100vh' }}>
         <div className="loading-container" style={{ textAlign: 'center', padding: '4rem 2rem' }}>
-          <div className="loading-spinner" style={{ 
-            width: '48px', 
-            height: '48px', 
-            border: '4px solid #e5e7eb', 
-            borderTop: '4px solid #3b82f6', 
-            borderRadius: '50%', 
+          <div className="loading-spinner" style={{
+            width: '48px',
+            height: '48px',
+            border: '4px solid #e5e7eb',
+            borderTop: '4px solid #3b82f6',
+            borderRadius: '50%',
             animation: 'spin 1s linear infinite',
             margin: '0 auto 1rem'
           }}></div>
@@ -143,19 +144,19 @@ export default function UserProfile({ userRole, onBack }) {
     return (
       <div className="profile-page" style={{ padding: '2rem', background: '#f9fafb', minHeight: '100vh' }}>
         <div className="error-container" style={{ textAlign: 'center', padding: '4rem 2rem' }}>
-          <div className="error-icon" style={{ 
-            width: '48px', 
-            height: '48px', 
-            fill: '#ef4444', 
-            margin: '0 auto 1rem' 
+          <div className="error-icon" style={{
+            width: '48px',
+            height: '48px',
+            fill: '#ef4444',
+            margin: '0 auto 1rem'
           }}>
             <svg viewBox="0 0 24 24">
-              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
             </svg>
           </div>
           <h3 style={{ color: '#ef4444', marginBottom: '0.5rem' }}>Error Loading Profile</h3>
           <p style={{ color: '#6b7280', marginBottom: '1rem' }}>{error}</p>
-          <button 
+          <button
             onClick={fetchUserProfile}
             style={{
               padding: '0.5rem 1rem',
@@ -175,8 +176,8 @@ export default function UserProfile({ userRole, onBack }) {
 
   return (
     <div className="profile-page" style={{ padding: '2rem', background: '#f9fafb', minHeight: '100vh' }}>
-      <div className="profile-container" style={{ 
-        maxWidth: '800px', 
+      <div className="profile-container" style={{
+        maxWidth: '800px',
         margin: '0 auto',
         background: 'white',
         borderRadius: '16px',
@@ -184,7 +185,7 @@ export default function UserProfile({ userRole, onBack }) {
         overflow: 'hidden'
       }}>
         {/* Header */}
-        <div className="profile-header" style={{ 
+        <div className="profile-header" style={{
           background: `linear-gradient(135deg, ${getRoleColor(userRole)} 0%, ${getRoleColor(userRole)}dd 100%)`,
           padding: '2rem',
           textAlign: 'center',
@@ -362,11 +363,11 @@ export default function UserProfile({ userRole, onBack }) {
               </div>
 
               <div className="info-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.5rem' }}>
-                <div className="info-card" style={{ 
-                  padding: '1.5rem', 
-                  background: '#f9fafb', 
-                  borderRadius: '12px', 
-                  border: '1px solid #e5e7eb' 
+                <div className="info-card" style={{
+                  padding: '1.5rem',
+                  background: '#f9fafb',
+                  borderRadius: '12px',
+                  border: '1px solid #e5e7eb'
                 }}>
                   <div className="info-label" style={{ fontSize: '0.75rem', fontWeight: '600', color: '#6b7280', marginBottom: '0.5rem' }}>
                     Full Name (English)
@@ -376,11 +377,11 @@ export default function UserProfile({ userRole, onBack }) {
                   </div>
                 </div>
 
-                <div className="info-card" style={{ 
-                  padding: '1.5rem', 
-                  background: '#f9fafb', 
-                  borderRadius: '12px', 
-                  border: '1px solid #e5e7eb' 
+                <div className="info-card" style={{
+                  padding: '1.5rem',
+                  background: '#f9fafb',
+                  borderRadius: '12px',
+                  border: '1px solid #e5e7eb'
                 }}>
                   <div className="info-label" style={{ fontSize: '0.75rem', fontWeight: '600', color: '#6b7280', marginBottom: '0.5rem' }}>
                     Full Name (Arabic)
@@ -390,11 +391,11 @@ export default function UserProfile({ userRole, onBack }) {
                   </div>
                 </div>
 
-                <div className="info-card" style={{ 
-                  padding: '1.5rem', 
-                  background: '#f9fafb', 
-                  borderRadius: '12px', 
-                  border: '1px solid #e5e7eb' 
+                <div className="info-card" style={{
+                  padding: '1.5rem',
+                  background: '#f9fafb',
+                  borderRadius: '12px',
+                  border: '1px solid #e5e7eb'
                 }}>
                   <div className="info-label" style={{ fontSize: '0.75rem', fontWeight: '600', color: '#6b7280', marginBottom: '0.5rem' }}>
                     Email Address
@@ -404,11 +405,11 @@ export default function UserProfile({ userRole, onBack }) {
                   </div>
                 </div>
 
-                <div className="info-card" style={{ 
-                  padding: '1.5rem', 
-                  background: '#f9fafb', 
-                  borderRadius: '12px', 
-                  border: '1px solid #e5e7eb' 
+                <div className="info-card" style={{
+                  padding: '1.5rem',
+                  background: '#f9fafb',
+                  borderRadius: '12px',
+                  border: '1px solid #e5e7eb'
                 }}>
                   <div className="info-label" style={{ fontSize: '0.75rem', fontWeight: '600', color: '#6b7280', marginBottom: '0.5rem' }}>
                     Phone Number
@@ -418,11 +419,11 @@ export default function UserProfile({ userRole, onBack }) {
                   </div>
                 </div>
 
-                <div className="info-card" style={{ 
-                  padding: '1.5rem', 
-                  background: '#f9fafb', 
-                  borderRadius: '12px', 
-                  border: '1px solid #e5e7eb' 
+                <div className="info-card" style={{
+                  padding: '1.5rem',
+                  background: '#f9fafb',
+                  borderRadius: '12px',
+                  border: '1px solid #e5e7eb'
                 }}>
                   <div className="info-label" style={{ fontSize: '0.75rem', fontWeight: '600', color: '#6b7280', marginBottom: '0.5rem' }}>
                     User ID
@@ -432,11 +433,11 @@ export default function UserProfile({ userRole, onBack }) {
                   </div>
                 </div>
 
-                <div className="info-card" style={{ 
-                  padding: '1.5rem', 
-                  background: '#f9fafb', 
-                  borderRadius: '12px', 
-                  border: '1px solid #e5e7eb' 
+                <div className="info-card" style={{
+                  padding: '1.5rem',
+                  background: '#f9fafb',
+                  borderRadius: '12px',
+                  border: '1px solid #e5e7eb'
                 }}>
                   <div className="info-label" style={{ fontSize: '0.75rem', fontWeight: '600', color: '#6b7280', marginBottom: '0.5rem' }}>
                     Account Status
@@ -451,9 +452,9 @@ export default function UserProfile({ userRole, onBack }) {
         </div>
 
         {/* Footer */}
-        <div className="profile-footer" style={{ 
-          padding: '1.5rem 2rem', 
-          background: '#f9fafb', 
+        <div className="profile-footer" style={{
+          padding: '1.5rem 2rem',
+          background: '#f9fafb',
           borderTop: '1px solid #e5e7eb',
           display: 'flex',
           justifyContent: 'space-between',

@@ -28,6 +28,11 @@ public class AuthController : ControllerBase
         if (string.IsNullOrWhiteSpace(model.Email) || string.IsNullOrWhiteSpace(model.Password))
             return BadRequest(new { message = "Email and password are required" });
 
+        // Validate password strength
+        var passwordValidation = ValidatePasswordStrength(model.Password);
+        if (!passwordValidation.IsValid)
+            return BadRequest(new { message = passwordValidation.ErrorMessage });
+
         if (await _db.Accounts.AnyAsync(a => a.Email == model.Email))
             return Conflict(new { message = "Email already exists" });
 
@@ -45,11 +50,11 @@ public class AuthController : ControllerBase
             statusId = await _db.Statuses.Select(s => s.Id).OrderBy(id => id).FirstAsync();
         }
 
-        // Create account
+        // Create account with bcrypt hashed password
         var account = new Account
         {
             Email = model.Email,
-            PasswordHash = ComputeSha256(model.Password),
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword(model.Password),
             FullNameEn = model.FullNameEn ?? model.Email,
             FullNameAr = model.FullNameAr ?? model.Email,
             NationalId = $"NID-{Guid.NewGuid().ToString("N").Substring(0,8)}",
@@ -73,12 +78,15 @@ public class AuthController : ControllerBase
         if (string.IsNullOrWhiteSpace(model.Email) || string.IsNullOrWhiteSpace(model.Password))
             return BadRequest(new { message = "Email and password are required" });
 
-        var account = await _db.Accounts.AsNoTracking().FirstOrDefaultAsync(a => a.Email == model.Email && a.IsActive);
+        var account = await _db.Accounts
+            .Include(a => a.Role)
+            .FirstOrDefaultAsync(a => a.Email == model.Email && a.IsActive);
+        
         if (account == null)
             return Unauthorized(new { message = "Invalid credentials" });
 
-        var incomingHash = ComputeSha256(model.Password);
-        if (!TimingSafeEquals(account.PasswordHash ?? string.Empty, incomingHash))
+        // Verify password using bcrypt
+        if (!BCrypt.Net.BCrypt.Verify(model.Password, account.PasswordHash ?? string.Empty))
             return Unauthorized(new { message = "Invalid credentials" });
 
         var roles = await _db.AccountRoles
@@ -87,7 +95,17 @@ public class AuthController : ControllerBase
             .ToListAsync();
 
         var token = GenerateJwtToken(account, roles);
-        return Ok(new { token, roles });
+        
+        return Ok(new 
+        { 
+            token, 
+            roles,
+            accountId = account.Id,
+            email = account.Email,
+            fullNameEn = account.FullNameEn,
+            fullNameAr = account.FullNameAr,
+            role = account.Role?.RoleName
+        });
     }
 
     [HttpGet("profile/{id}")]
@@ -181,20 +199,23 @@ public class AuthController : ControllerBase
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
-    private static string ComputeSha256(string raw)
+    private static (bool IsValid, string ErrorMessage) ValidatePasswordStrength(string password)
     {
-        using var sha = System.Security.Cryptography.SHA256.Create();
-        var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(raw));
-        var sb = new StringBuilder(bytes.Length * 2);
-        foreach (var b in bytes) sb.Append(b.ToString("x2"));
-        return sb.ToString();
-    }
-
-    private static bool TimingSafeEquals(string a, string b)
-    {
-        if (a.Length != b.Length) return false;
-        int diff = 0;
-        for (int i = 0; i < a.Length; i++) diff |= a[i] ^ b[i];
-        return diff == 0;
+        if (string.IsNullOrWhiteSpace(password))
+            return (false, "Password is required");
+        
+        if (password.Length < 8)
+            return (false, "Password must be at least 8 characters long");
+        
+        if (!password.Any(char.IsUpper))
+            return (false, "Password must contain at least one uppercase letter");
+        
+        if (!password.Any(char.IsLower))
+            return (false, "Password must contain at least one lowercase letter");
+        
+        if (!password.Any(char.IsDigit))
+            return (false, "Password must contain at least one digit");
+        
+        return (true, string.Empty);
     }
 }

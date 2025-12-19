@@ -1560,3 +1560,5 @@ C:\Users\Seif\Downloads\Quizes_StudentInterfacev2_10-11-main\QuizesV4 13-11\serv
 C:\Users\Seif\Downloads\Quizes_StudentInterfacev2_10-11-main\QuizesV4 13-11\server\api\obj\Debug\net9.0\QuizesApi.pdb
 C:\Users\Seif\Downloads\Quizes_StudentInterfacev2_10-11-main\QuizesV4 13-11\server\api\obj\Debug\net9.0\QuizesApi.genruntimeconfig.cache
 C:\Users\Seif\Downloads\Quizes_StudentInterfacev2_10-11-main\QuizesV4 13-11\server\api\obj\Debug\net9.0\ref\QuizesApi.dll
+C:\Users\Seif\Downloads\Quizes_StudentInterfacev2_10-11-main\QuizesV4 13-11\server\api\obj\Debug\net9.0\QuizesApi.sourcelink.json
+C:\Users\Seif\Downloads\Quizes_StudentInterfacev2_10-11-main\QuizesV4 13-11\server\api\bin\Debug\net9.0\BCrypt.Net-Next.dll

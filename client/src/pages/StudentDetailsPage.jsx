@@ -1,19 +1,28 @@
-import { useMemo, useState, useEffect } from 'react'
+import { useMemo, useState, useEffect, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
+import Sidebar from '../components/Sidebar'
+import QuizModal from '../components/QuizModal'
 import ErrorBoundary from '../components/ErrorBoundary'
+import { storage } from '../utils/storage'
 
 export default function StudentDetailsPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const [student, setStudent] = useState(null)
 
+  // Modal state
+  const [isModalActive, setIsModalActive] = useState(false)
+  const [modalTitle, setModalTitle] = useState('')
+  const [modalMessage, setModalMessage] = useState('')
+  const modalResolveRef = useRef(null)
+
   useEffect(() => {
-    // Get student data from location state or localStorage
+    // Get student data from location state or storage
     if (location.state?.student) {
       setStudent(location.state.student)
     } else {
-      // Fallback to localStorage if direct navigation
-      const storedStudent = localStorage.getItem('selectedStudentData')
+      // Fallback to storage if direct navigation
+      const storedStudent = storage.getItem('selectedStudentData')
       if (storedStudent) {
         setStudent(JSON.parse(storedStudent))
       } else {
@@ -23,19 +32,40 @@ export default function StudentDetailsPage() {
     }
   }, [location, navigate])
 
-  function handleLogout() {
-    if (confirm('Are you sure you want to logout?')) {
-      // Clear all tokens and user state
-      localStorage.removeItem('token')
-      localStorage.removeItem('userRole')
-      localStorage.removeItem('selectedStudentData')
-      // Clear any other user-related data
-      localStorage.clear()
-      // Reset state
-      setStudent(null)
-      // Redirect to login
-      navigate('/')
+  function showModal(title, message) {
+    return new Promise((resolve) => {
+      setIsModalActive(true)
+      setModalTitle(title)
+      setModalMessage(message)
+      modalResolveRef.current = resolve
+    })
+  }
+
+  const handleModalConfirm = () => {
+    setIsModalActive(false)
+    if (modalResolveRef.current) {
+      modalResolveRef.current(true)
     }
+  }
+
+  const handleModalCancel = () => {
+    setIsModalActive(false)
+    if (modalResolveRef.current) {
+      modalResolveRef.current(false)
+    }
+  }
+
+  function handleLogout() {
+    showModal('Confirm Logout', 'Are you sure you want to logout?').then((confirmed) => {
+      if (confirmed) {
+        // Clear all session data
+        storage.clear()
+        // Reset state
+        setStudent(null)
+        // Redirect to login
+        navigate('/')
+      }
+    })
   }
 
   function goBack() {
@@ -57,35 +87,16 @@ export default function StudentDetailsPage() {
       <div className="dashboard-container">
 
 
-        <div className="sidebar">
-          <div className="sidebar-header">
-            <div className="profile-section">
-              <div className="profile-picture">SA</div>
-              <div className="profile-info">
-                <h3>Super Admin</h3>
-                <p>admin@school.com</p>
-              </div>
-            </div>
-          </div>
-          <div className="sidebar-divider" />
-          <nav className="sidebar-nav">
-            <div className="nav-item">
-              <button className="nav-button" onClick={goBack}>
-                <svg className="nav-icon" viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8v-6h-8v10zm0-18v6h8V3h-8z" /></svg>
-                Back to Dashboard
-              </button>
-            </div>
-          </nav>
-          <div className="sidebar-footer">
-            <div className="sidebar-divider" />
-            <div className="nav-item">
-              <button className="nav-button logout-btn" onClick={handleLogout}>
-                <svg className="nav-icon" viewBox="0 0 24 24"><path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.59L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z" /></svg>
-                Logout
-              </button>
-            </div>
-          </div>
-        </div>
+        <Sidebar
+          isExamActive={false}
+          currentSection="students"
+          showSection={(section) => {
+            if (section === 'main' || section === 'dashboard') navigate('/superadmin')
+            else navigate('/superadmin', { state: { section } })
+          }}
+          handleLogout={handleLogout}
+          userRole="Admin"
+        />
 
         <div className="main-content">
           <div>
@@ -176,6 +187,13 @@ export default function StudentDetailsPage() {
           </div>
         </div>
       </div>
+      <QuizModal
+        title={modalTitle}
+        message={modalMessage}
+        onConfirm={handleModalConfirm}
+        onCancel={handleModalCancel}
+        isActive={isModalActive}
+      />
     </ErrorBoundary>
   )
 }
