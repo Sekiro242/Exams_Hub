@@ -725,9 +725,8 @@ export default function TeacherPage() {
   function handleFileUploadQuestions(questions) {
     if (currentSection === 'bank-editor') {
       // Prepend uploaded questions (keep their order) to the top
-      // Remove any IDs from uploaded questions to avoid conflicts
-      const questionsWithoutIds = questions.map(q => ({ ...q, id: undefined }))
-      setBankEditorQuestions((prev) => [...questionsWithoutIds, ...prev])
+      // Keep IDs from backend
+      setBankEditorQuestions((prev) => [...questions, ...prev])
     } else if (currentSection === 'quiz-editor') {
       setCurrentQuizQuestions((prev) => [...questions, ...prev])
     }
@@ -858,7 +857,12 @@ export default function TeacherPage() {
             mark: q.marks ?? 1,
             accountId: accountId
           };
-          await api.post('/questionbank', questionPayload);
+
+          if (q.id) {
+            await api.put(`/questionbank/${q.id}`, questionPayload);
+          } else {
+            await api.post('/questionbank', questionPayload);
+          }
         }
       }
       // Update the frontend state directly instead of re-fetching
@@ -1283,6 +1287,7 @@ export default function TeacherPage() {
                 <FileUpload
                   onQuestionsExtracted={handleFileUploadQuestions}
                   onClose={() => setShowFileUpload(false)}
+                  bankKey={bankKeyRef.current}
                 />
               ) : null}
             </div>
@@ -1524,6 +1529,12 @@ export default function TeacherPage() {
               </div>
               <div className="editor-actions" style={{ display: 'flex', gap: '1rem', marginTop: '2rem', paddingTop: '2rem', borderTop: '1px solid #e5e7eb' }}><button className="save-btn" style={{ padding: '.75rem 2rem', background: '#dc2626', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: 'pointer' }} onClick={saveQuiz}>Save Exam</button><button className="cancel-btn" style={{ padding: '.75rem 2rem', background: '#6b7280', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: 'pointer' }} onClick={cancelEdit}>Cancel</button></div>
             </div>
+            {showFileUpload ? (
+              <FileUpload
+                onQuestionsExtracted={handleFileUploadQuestions}
+                onClose={() => setShowFileUpload(false)}
+              />
+            ) : null}
           </div>
         )
       case 'question-bank-selector':
