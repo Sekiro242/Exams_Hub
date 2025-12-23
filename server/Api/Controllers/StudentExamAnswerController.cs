@@ -52,6 +52,17 @@ namespace QuizesApi.Controllers
                     .Where(a => a.ExamId == exam.ExamId && examQuestionIds.Contains(a.QuestionId))
                     .ToList();
 
+                // Debug logging
+                if (exam.Title == "test" || true) 
+                {
+                   /* Console.WriteLine($"Exam: {exam.Title} ({exam.ExamId})");
+                    Console.WriteLine($"  Questions: {examQuestionIds.Count}");
+                    Console.WriteLine($"  Answers Found: {answers.Count}");
+                    foreach(var a in answers) {
+                        Console.WriteLine($"    Ans: Q{a.QuestionId} Exam:{a.ExamId} Val:{a.ChoosedAnswer}");
+                    }*/
+                }
+
                 // Only return exam as completed if student has answers for ALL questions in this exam
                 // This ensures answers from other exams (even with same questions) don't mark this exam as completed
                 if (examQuestionIds.Count == 0 || answers.Count == 0 || answers.Count < examQuestionIds.Count) return null;

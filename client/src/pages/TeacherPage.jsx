@@ -492,6 +492,7 @@ export default function TeacherPage() {
     if ((!className && (!classIds || classIds.length === 0))) return window.alert('Please select at least one class')
     if (!datetime) return window.alert('Please select date and time for the quiz')
     if (!startDate) return window.alert('Please select a start date for the quiz')
+    if (new Date(datetime) <= new Date(startDate)) return window.alert('End date must be after start date')
     if (currentQuizQuestions.length === 0) return window.alert('Please add at least one question to the quiz')
 
     const quizData = {

@@ -27,7 +27,7 @@ export default function StudentPage() {
   const quizTimerRef = useRef(null)
 
   // Real data from backend
-  const [exams, setExams] = useState([])
+  const [exams, setExams] = useState({ available: [], upcoming: [] })
   const [completedExams, setCompletedExams] = useState([])
 
   // Subject metadata (icons + descriptions) used by DashboardView rendering
@@ -132,20 +132,48 @@ export default function StudentPage() {
         const examsData = examsRes.data || []
         const completedData = completedRes.data || []
 
-        // Filter available exams (started, not expired, and not completed)
+        // Filter exams into categories
         const now = new Date()
         const completedExamIds = new Set(completedData.map(e => e.examId))
-        const availableExams = examsData.filter(exam => {
-          const startDate = new Date(exam.startDate)
-          const endDate = new Date(exam.endDate)
-          // Exam must have started (startDate <= now), not expired (endDate > now), and not completed
-          return startDate <= now && endDate > now && !completedExamIds.has(exam.examId)
-        })
 
-        // Move expired exams to completed automatically
-        const expiredExams = examsData.filter(exam => {
-          const endDate = new Date(exam.endDate)
-          return endDate <= now && !completedExamIds.has(exam.examId)
+        // Helper to check if date is valid
+        const isValidDate = (d) => d instanceof Date && !isNaN(d) && d.getFullYear() > 1970
+
+        const availableExams = []
+        const upcomingExams = []
+        const expiredExams = []
+
+        examsData.forEach(exam => {
+          // Skip if already completed by student
+          if (completedExamIds.has(exam.examId)) return
+
+          const startDate = exam.startDate ? new Date(exam.startDate) : null
+          const endDate = exam.endDate ? new Date(exam.endDate) : null
+
+          // treat null start date as "now" (started)
+          const hasStarted = !startDate || !isValidDate(startDate) || startDate <= now
+
+          // treat null end date as "never expires" (future)
+          const hasExpired = endDate && isValidDate(endDate) && endDate <= now
+
+          // DEBUG LOGGING
+          if (true) {
+            console.log(`Exam: ${exam.title} (ID: ${exam.examId})`)
+            console.log(`  Raw Start: ${exam.startDate}, Parsed: ${startDate}`)
+            console.log(`  Raw End: ${exam.endDate}, Parsed: ${endDate}`)
+            console.log(`  Now: ${now}`)
+            console.log(`  hasStarted: ${hasStarted}, hasExpired: ${hasExpired}`)
+            console.log(`  In CompletedData: ${completedExamIds.has(exam.examId)}`)
+          }
+
+          if (hasExpired) {
+            expiredExams.push(exam)
+          } else if (hasStarted) {
+            availableExams.push(exam)
+          } else {
+            // Not started yet
+            upcomingExams.push(exam)
+          }
         })
 
         // Add expired exams to completed if they're not already there
@@ -162,7 +190,7 @@ export default function StudentPage() {
           questions: exam.questions || []
         }))
 
-        setExams(availableExams)
+        setExams({ available: availableExams, upcoming: upcomingExams })
         setCompletedExams([...completedData, ...expiredCompleted.filter(e => !completedExamIds.has(e.examId))])
 
       } catch (err) {
@@ -429,7 +457,11 @@ export default function StudentPage() {
       const response = await api.post('/studentexamanswer/submit', submissionPayload)
 
       // Move exam from available to completed
-      setExams(prev => prev.filter(exam => exam.examId !== currentExam.id))
+      setExams(prev => ({
+        ...prev,
+        available: prev.available.filter(exam => exam.examId !== currentExam.id),
+        upcoming: prev.upcoming.filter(exam => exam.examId !== currentExam.id)
+      }))
 
       // Add to completed exams
       const completedExam = {
@@ -562,7 +594,7 @@ export default function StudentPage() {
           isCorrect: q.isCorrect,
           marks: q.mark || 1
         }
-      })
+      }).sort((a, b) => b.id - a.id)
 
       const reviewExamData = {
         id: examData.examId,
@@ -594,7 +626,7 @@ export default function StudentPage() {
 
   // Convert backend exam data to frontend format
   const examData = useMemo(() => {
-    const available = exams.map(exam => {
+    const processExamList = (list) => list.map(exam => {
       const questions = (exam.questions || []).map(q => {
         const options = [q.optionA, q.optionB, q.optionC, q.optionD].filter(Boolean)
 
@@ -626,6 +658,9 @@ export default function StudentPage() {
         questions: questions
       }
     })
+
+    const available = processExamList(exams.available)
+    const upcoming = processExamList(exams.upcoming)
 
     const completed = completedExams.map(exam => {
       const questions = (exam.questions || []).map(q => {
@@ -667,7 +702,7 @@ export default function StudentPage() {
       }
     })
 
-    return { available, completed }
+    return { available, upcoming, completed }
   }, [exams, completedExams])
 
   return (
@@ -837,7 +872,8 @@ export default function StudentPage() {
                     </p>
                   </div>
 
-                  {exams.length === 0 ? (
+                  {/* Available Exams */}
+                  {exams.available.length === 0 && exams.upcoming.length === 0 ? (
                     <div style={{
                       background: 'var(--bg-main)',
                       borderRadius: '16px',
@@ -854,97 +890,160 @@ export default function StudentPage() {
                       </p>
                     </div>
                   ) : (
-                    <div style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
-                      gap: '1.5rem'
-                    }}>
-                      {exams.map((exam) => {
-                        const timeUntil = getTimeUntilDeadline(exam.deadline || exam.endDate)
-                        return (
-                          <div
-                            key={exam.examId}
-                            className="exam-card"
-                            style={{
-                              background: 'var(--bg-main)',
-                              borderRadius: 'var(--radius-lg)',
-                              padding: '1.5rem',
-                              boxShadow: 'var(--shadow-md)',
-                              borderLeft: '4px solid var(--primary)',
-                              transition: 'all var(--transition-base)',
-                              cursor: 'pointer',
-                              position: 'relative',
-                              overflow: 'hidden'
-                            }}
-                            onClick={() => startExam(exam)}
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.transform = 'translateY(-4px)'
-                              e.currentTarget.style.boxShadow = 'var(--shadow-xl)'
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.transform = 'translateY(0)'
-                              e.currentTarget.style.boxShadow = 'var(--shadow-md)'
-                            }}
-                          >
-                            {/* Random Questions Badge */}
-                            <div style={{
-                              position: 'absolute',
-                              top: '1rem',
-                              right: '1rem',
-                              background: 'linear-gradient(135deg, var(--accent), var(--primary))',
-                              color: 'white',
-                              padding: '0.25rem 0.75rem',
-                              borderRadius: 'var(--radius-full)',
-                              fontSize: '0.75rem',
-                              fontWeight: '700',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '0.25rem',
-                              boxShadow: 'var(--shadow-sm)'
-                            }}>
-                              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z" />
-                              </svg>
-                              Randomized
-                            </div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem', marginTop: '1.5rem' }}>
-                              <div>
-                                <h3 style={{ fontSize: '1.25rem', fontWeight: '700', color: 'var(--text-primary)', margin: '0 0 0.5rem 0' }}>{exam.title}</h3>
-                                <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', margin: 0 }}>{exam.examSubject || 'General'}</p>
-                              </div>
-                              <div style={{ background: 'var(--primary-light)', color: 'var(--primary)', padding: '0.25rem 0.75rem', borderRadius: '999px', fontSize: '0.75rem', fontWeight: '700' }}>
-                                {exam.questions ? exam.questions.length : 0} Qs
-                              </div>
-                            </div>
+                    <>
+                      {/* Available Section */}
+                      {exams.available.length > 0 && (
+                        <div style={{ marginBottom: '3rem' }}>
+                          <h2 style={{ fontSize: '1.5rem', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--success)', display: 'inline-block' }}></span>
+                            Active Now
+                          </h2>
+                          <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+                            gap: '1.5rem'
+                          }}>
+                            {exams.available.map((exam) => {
+                              const timeUntil = getTimeUntilDeadline(exam.deadline || exam.endDate)
+                              return (
+                                <div
+                                  key={exam.examId}
+                                  className="exam-card"
+                                  style={{
+                                    background: 'var(--bg-main)',
+                                    borderRadius: 'var(--radius-lg)',
+                                    padding: '1.5rem',
+                                    boxShadow: 'var(--shadow-md)',
+                                    borderLeft: '4px solid var(--primary)',
+                                    transition: 'all var(--transition-base)',
+                                    cursor: 'pointer',
+                                    position: 'relative',
+                                    overflow: 'hidden'
+                                  }}
+                                  onClick={() => startExam(exam)}
+                                  onMouseEnter={(e) => {
+                                    e.currentTarget.style.transform = 'translateY(-4px)'
+                                    e.currentTarget.style.boxShadow = 'var(--shadow-xl)'
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    e.currentTarget.style.transform = 'translateY(0)'
+                                    e.currentTarget.style.boxShadow = 'var(--shadow-md)'
+                                  }}
+                                >
+                                  {/* Random Questions Badge */}
+                                  <div style={{
+                                    position: 'absolute',
+                                    top: '1rem',
+                                    right: '1rem',
+                                    background: 'linear-gradient(135deg, var(--accent), var(--primary))',
+                                    color: 'white',
+                                    padding: '0.25rem 0.75rem',
+                                    borderRadius: 'var(--radius-full)',
+                                    fontSize: '0.75rem',
+                                    fontWeight: '700',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.25rem',
+                                    boxShadow: 'var(--shadow-sm)'
+                                  }}>
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                                      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z" />
+                                    </svg>
+                                    Randomized
+                                  </div>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem', marginTop: '1.5rem' }}>
+                                    <div>
+                                      <h3 style={{ fontSize: '1.25rem', fontWeight: '700', color: 'var(--text-primary)', margin: '0 0 0.5rem 0' }}>{exam.title} <span style={{ fontSize: '0.8rem', opacity: 0.5 }}>(#{exam.examId})</span></h3>
+                                      <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', margin: 0 }}>{exam.examSubject || 'General'}</p>
+                                    </div>
+                                    <div style={{ background: 'var(--primary-light)', color: 'var(--primary)', padding: '0.25rem 0.75rem', borderRadius: '999px', fontSize: '0.75rem', fontWeight: '700' }}>
+                                      {exam.questions ? exam.questions.length : 0} Qs
+                                    </div>
+                                  </div>
 
-                            <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '1.5rem', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                              {exam.examDescription}
-                            </p>
+                                  <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '1.5rem', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                                    {exam.examDescription}
+                                  </p>
 
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z" /><path d="M12.5 7H11v6l5.25 3.15.75-1.23-4.5-2.67z" /></svg>
-                                {timeUntil ? `Ends in ${timeUntil}` : 'Ends soon'}
-                              </div>
-                              <button style={{
-                                background: 'var(--primary)',
-                                color: 'white',
-                                border: 'none',
-                                padding: '0.5rem 1.25rem',
-                                borderRadius: '8px',
-                                fontWeight: '600',
-                                cursor: 'pointer',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '0.5rem'
-                              }}>
-                                Start <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
-                              </button>
-                            </div>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z" /><path d="M12.5 7H11v6l5.25 3.15.75-1.23-4.5-2.67z" /></svg>
+                                      {timeUntil ? `Ends in ${timeUntil}` : 'Ends soon'}
+                                    </div>
+                                    <button style={{
+                                      background: 'var(--primary)',
+                                      color: 'white',
+                                      border: 'none',
+                                      padding: '0.5rem 1.25rem',
+                                      borderRadius: '8px',
+                                      fontWeight: '600',
+                                      cursor: 'pointer',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '0.5rem'
+                                    }}>
+                                      Start <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
+                                    </button>
+                                  </div>
+                                </div>
+                              )
+                            })}
                           </div>
-                        )
-                      })}
-                    </div>
+                        </div>
+                      )}
+
+                      {/* Upcoming Section */}
+                      {exams.upcoming.length > 0 && (
+                        <div>
+                          <h2 style={{ fontSize: '1.5rem', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="var(--warning)"><path d="M22 5.72l-4.6-3.86-1.29 1.53 4.6 3.86L22 5.72zM7.88 3.39L6.6 1.86 2 5.71l1.29 1.53 4.59-3.85zM12.5 8H11v6l4.75 2.85.75-1.23-4-2.37V8zM12 4c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9-4.03-9-9-9zm0 16c-3.86 0-7-3.14-7-7s3.14-7 7-7 7 3.14 7 7-3.14 7-7 7z" /></svg>
+                            Upcoming
+                          </h2>
+                          <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+                            gap: '1.5rem'
+                          }}>
+                            {exams.upcoming.map((exam) => (
+                              <div
+                                key={exam.examId}
+                                className="exam-card"
+                                style={{
+                                  background: 'var(--bg-main)',
+                                  borderRadius: 'var(--radius-lg)',
+                                  padding: '1.5rem',
+                                  boxShadow: 'var(--shadow-sm)',
+                                  borderLeft: '4px solid var(--warning)',
+                                  opacity: 0.9
+                                }}
+                              >
+                                <div>
+                                  <h3 style={{ fontSize: '1.25rem', fontWeight: '700', color: 'var(--text-primary)', margin: '0 0 0.5rem 0' }}>{exam.title}</h3>
+                                  <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', margin: 0 }}>{exam.examSubject || 'General'}</p>
+                                </div>
+                                <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', margin: '1rem 0' }}>
+                                  {exam.examDescription}
+                                </p>
+                                <div style={{
+                                  padding: '0.75rem',
+                                  background: 'var(--warning-bg)',
+                                  color: 'var(--warning-dark)',
+                                  borderRadius: '8px',
+                                  fontSize: '0.875rem',
+                                  fontWeight: '600',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '0.5rem'
+                                }}>
+                                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z" /><path d="M12.5 7H11v6l5.25 3.15.75-1.23-4.5-2.67z" /></svg>
+                                  Starts: {new Date(exam.startDate).toLocaleString()}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
@@ -1011,7 +1110,7 @@ export default function StudentPage() {
                         >
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
                             <div>
-                              <h3 style={{ fontSize: '1.25rem', fontWeight: '700', color: 'var(--text-primary)', margin: '0 0 0.5rem 0' }}>{exam.title}</h3>
+                              <h3 style={{ fontSize: '1.25rem', fontWeight: '700', color: 'var(--text-primary)', margin: '0 0 0.5rem 0' }}>{exam.title} <span style={{ fontSize: '0.8rem', opacity: 0.5 }}>(#{exam.examId})</span></h3>
                               <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', margin: 0 }}>{exam.examSubject || 'General'}</p>
                             </div>
                             <div style={{ background: 'var(--success-bg)', color: 'var(--success)', padding: '0.25rem 0.75rem', borderRadius: '999px', fontSize: '0.75rem', fontWeight: '700' }}>
