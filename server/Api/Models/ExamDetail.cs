@@ -1,24 +1,30 @@
-﻿using QuizesApi.Models;
+﻿using System;
+using System.Collections.Generic;
 
-public class ExamDetail
+namespace QuizesApi.Models;
+
+public partial class ExamDetail
 {
     public long ExamId { get; set; }
 
-    public required string Title { get; set; }
-    public long? SubjectId { get; set; }
-    public required string ExamDescription { get; set; }
+    public string? Title { get; set; }
+
+    public string? ExamSubject { get; set; }
+
+    public string? ExamDescription { get; set; }
+
+    public DateTime? StartDate { get; set; }
+
+    public DateTime? EndDate { get; set; }
+
     public long? GradeId { get; set; }
-    public long? ClassId { get; set; }
-    public DateTime StartDate { get; set; }
-    public DateTime EndDate { get; set; }
-    public long CreatedBy_AccID { get; set; }
 
-    // Navigation properties
-    public Subject? Subject { get; set; }
-    public Grade? Grade { get; set; }
-    public TblClass? Class { get; set; } // Keep for backward compatibility
-    public Account Creator { get; set; } = null!;
+    public string? ClassId { get; set; }
 
-    public ICollection<ExamQuestionBank> ExamQuestionBanks { get; set; } = new List<ExamQuestionBank>();
-    public ICollection<ExamClass> ExamClasses { get; set; } = new List<ExamClass>(); // Multiple classes support
+    public long? CreatedBy_AccId { get; set; }
+
+    public long? SubjectId { get; set; }
+
+    public virtual Status? Subject { get; set; }
+    public virtual ICollection<StudentExamAnswer> StudentExamAnswers { get; set; } = new List<StudentExamAnswer>();
 }

@@ -1,76 +1,108 @@
 import { useState, useEffect } from 'react'
 import api from '../api/axios'
+import ModernSelect from './ModernSelect'
+import ModernDatePicker from './ModernDatePicker'
 
-export default function DashboardFilters({ onFilterChange, userRole }) {
-  const [grades, setGrades] = useState([])
-  const [classes, setClasses] = useState([])
-  const [selectedGrade, setSelectedGrade] = useState('')
-  const [selectedClass, setSelectedClass] = useState('')
-  const [startDate, setStartDate] = useState('')
-  const [endDate, setEndDate] = useState('')
+export default function DashboardFilters({ onFilterChange, userRole, grades = [], classes = [], subjects = [], allExams = [], recentExams = [], selectedExamId = null, onExamChange, currentFilters = null }) {
+  const [selectedGrade, setSelectedGrade] = useState(currentFilters?.gradeId || '')
+  const [selectedClass, setSelectedClass] = useState(currentFilters?.classId || '')
+  const [selectedSubject, setSelectedSubject] = useState(currentFilters?.subjectId || '')
+  const [selectedGroupBy, setSelectedGroupBy] = useState(currentFilters?.groupBy || 'Student')
+  const [startDate, setStartDate] = useState(currentFilters?.startDate || '')
+  const [endDate, setEndDate] = useState(currentFilters?.endDate || '')
   const [activeFilters, setActiveFilters] = useState([])
 
-  // Fetch grades and classes from backend
+  // Update local state if currentFilters changes (e.g. from parent)
   useEffect(() => {
-    // Hardcoded filters as per user request
-    setGrades([
-      { id: 10, name: 'Junior' },
-      { id: 11, name: 'Wheeler' },
-      { id: 12, name: 'Senior' }
-    ])
-    setClasses([
-      { id: 1, name: 'A', gradeId: null },
-      { id: 2, name: 'B', gradeId: null },
-      { id: 3, name: 'C', gradeId: null },
-      { id: 4, name: 'D', gradeId: null }
-    ])
-  }, [])
-
-  // Classes are constant for all grades now
-  const filteredClasses = classes
-
-  const handleApplyFilters = () => {
-    const filters = {
-      gradeId: selectedGrade ? parseInt(selectedGrade) : null,
-      classId: selectedClass ? parseInt(selectedClass) : null,
-      startDate: startDate || null,
-      endDate: endDate || null
+    if (currentFilters) {
+      if (currentFilters.gradeId !== undefined) setSelectedGrade(currentFilters.gradeId || '')
+      if (currentFilters.classId !== undefined) setSelectedClass(currentFilters.classId || '')
+      if (currentFilters.subjectId !== undefined) setSelectedSubject(currentFilters.subjectId || '')
+      if (currentFilters.groupBy !== undefined) setSelectedGroupBy(currentFilters.groupBy || 'Student')
+      if (currentFilters.startDate !== undefined) setStartDate(currentFilters.startDate || '')
+      if (currentFilters.endDate !== undefined) setEndDate(currentFilters.endDate || '')
     }
+  }, [currentFilters])
 
-    // Build active filters summary
-    const active = []
-    if (selectedGrade) {
-      const grade = grades.find(g => g.id === parseInt(selectedGrade))
-      if (grade) active.push(grade.name)
-    }
-    if (selectedClass) {
-      const classItem = classes.find(c => c.id === parseInt(selectedClass))
-      if (classItem) active.push(classItem.name)
-    }
-    if (startDate && endDate) {
-      active.push(`${new Date(startDate).toLocaleDateString()} - ${new Date(endDate).toLocaleDateString()}`)
-    } else if (startDate) {
-      active.push(`From ${new Date(startDate).toLocaleDateString()}`)
-    } else if (endDate) {
-      active.push(`Until ${new Date(endDate).toLocaleDateString()}`)
-    }
+  // Debounced Filter Application
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      const filters = {
+        gradeId: selectedGrade ? parseInt(selectedGrade) : null,
+        classId: selectedClass ? parseInt(selectedClass) : null,
+        subjectId: selectedSubject ? parseInt(selectedSubject) : null,
+        startDate: startDate || null,
+        endDate: endDate || null,
+        groupBy: selectedGroupBy
+      }
 
-    setActiveFilters(active)
-    onFilterChange(filters)
-  }
+      // Build active filters summary
+      const active = []
+      if (selectedGrade) {
+        const grade = grades.find(g => g.id === parseInt(selectedGrade))
+        if (grade) active.push(grade.gradeName || grade.name)
+      }
+      if (selectedSubject) {
+        const subject = subjects.find(s => (s.id || s.Id) === parseInt(selectedSubject))
+        if (subject) active.push(subject.statusName || subject.subjectName)
+      }
+      if (selectedGroupBy === 'Class') {
+        active.push('Group by Class')
+      }
+      if (selectedClass) {
+        const classItem = classes.find(c => c.id === parseInt(selectedClass))
+        if (classItem) active.push(classItem.className || classItem.name)
+      }
+      if (startDate && endDate) {
+        active.push(`${new Date(startDate).toLocaleDateString()} - ${new Date(endDate).toLocaleDateString()}`)
+      } else if (startDate) {
+        active.push(`From ${new Date(startDate).toLocaleDateString()}`)
+      } else if (endDate) {
+        active.push(`Until ${new Date(endDate).toLocaleDateString()}`)
+      }
+
+      setActiveFilters(active)
+      onFilterChange(filters)
+    }, 400) // 400ms debounce
+
+    return () => clearTimeout(handler)
+  }, [selectedGrade, selectedClass, selectedSubject, startDate, endDate, selectedGroupBy, grades, classes, subjects])
+
+  const hasExamFilter = ((allExams && allExams.length > 0) || recentExams.length > 0)
+
+  // Classes are filtered based on selected grade
+  const filteredClasses = selectedGrade
+    ? classes.filter(c => !c.gradeId || String(c.gradeId) === String(selectedGrade))
+    : classes
+
+
+
+  // Filter exams based on grade and class
+  const filteredExams = (allExams && allExams.length > 0 ? allExams : recentExams)
+    .filter(exam => {
+      const examGradeId = exam.gradeId || exam.GradeId
+      if (selectedGrade && String(examGradeId) !== String(selectedGrade)) return false
+      
+      if (selectedClass) {
+        const examClassId = exam.classId || exam.ClassId
+        const matchLegacy = String(examClassId) === String(selectedClass)
+        
+        const classIds = exam.classes || exam.Classes || exam.classIds || exam.ClassIds || []
+        const matchArray = Array.isArray(classIds) && classIds.some(id => String(id) === String(selectedClass))
+        
+        if (!matchLegacy && !matchArray) return false
+      }
+      return true
+    })
 
   const handleClearFilters = () => {
     setSelectedGrade('')
     setSelectedClass('')
+    setSelectedSubject('')
+    setSelectedGroupBy('Student')
     setStartDate('')
     setEndDate('')
-    setActiveFilters([])
-    onFilterChange({
-      gradeId: null,
-      classId: null,
-      startDate: null,
-      endDate: null
-    })
+    // useEffect will handle the rest
   }
 
   return (
@@ -78,8 +110,9 @@ export default function DashboardFilters({ onFilterChange, userRole }) {
       background: 'var(--bg-main)',
       borderRadius: '16px',
       padding: '1.5rem',
-      boxShadow: 'var(--shadow-sm)',
-      marginBottom: '2rem'
+      boxShadow: '0 4px 20px rgba(0, 0, 0, 0.05)',
+      marginBottom: '1.5rem',
+      border: '1px solid #f1f3f5'
     }}>
       <div style={{
         display: 'flex',
@@ -102,197 +135,156 @@ export default function DashboardFilters({ onFilterChange, userRole }) {
 
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+        gridTemplateColumns: 'repeat(3, 1fr)', // Enforce a 3-column layout
         gap: '1rem',
-        marginBottom: '1rem'
+        marginBottom: '1rem',
+        alignItems: 'center' // Align items to the center of their grid area
       }}>
         {/* Grade Filter */}
         <div>
-          <label style={{
-            display: 'block',
-            fontSize: '0.875rem',
-            fontWeight: '500',
-            color: 'var(--text-secondary)',
-            marginBottom: '0.5rem'
-          }}>
-            Grade
-          </label>
-          <select
+          <ModernSelect
+            label="Grade"
             value={selectedGrade}
+            placeholder="All Grades"
+            searchable={true}
+            required={false}
+            options={[
+              { value: '', label: 'All Grades' },
+              ...grades.map(grade => ({ value: grade.id, label: grade.gradeName || grade.name }))
+            ]}
             onChange={(e) => {
               setSelectedGrade(e.target.value)
               setSelectedClass('') // Reset class when grade changes
             }}
-            style={{
-              width: '100%',
-              padding: '0.625rem',
-              borderRadius: '8px',
-              border: '1px solid var(--border-color)',
-              background: 'var(--bg-surface)',
-              color: 'var(--text-primary)',
-              fontSize: '0.875rem',
-              cursor: 'pointer',
-              transition: 'all 0.2s'
-            }}
-          >
-            <option value="">All Grades</option>
-            {grades.map(grade => (
-              <option key={grade.id} value={grade.id}>{grade.name}</option>
-            ))}
-          </select>
+          />
         </div>
 
         {/* Class Filter */}
         <div>
-          <label style={{
-            display: 'block',
-            fontSize: '0.875rem',
-            fontWeight: '500',
-            color: 'var(--text-secondary)',
-            marginBottom: '0.5rem'
-          }}>
-            Class
-          </label>
-          <select
+          <ModernSelect
+            label="Class"
             value={selectedClass}
-            onChange={(e) => setSelectedClass(e.target.value)}
+            placeholder="All Classes"
+            searchable={true}
+            required={false}
             disabled={!selectedGrade && filteredClasses.length === 0}
-            style={{
-              width: '100%',
-              padding: '0.625rem',
-              borderRadius: '8px',
-              border: '1px solid var(--border-color)',
-              background: 'var(--bg-surface)',
-              color: 'var(--text-primary)',
-              fontSize: '0.875rem',
-              cursor: 'pointer',
-              transition: 'all 0.2s',
-              opacity: !selectedGrade && filteredClasses.length === 0 ? 0.5 : 1
-            }}
-          >
-            <option value="">All Classes</option>
-            {filteredClasses.map(classItem => (
-              <option key={classItem.id} value={classItem.id}>{classItem.name}</option>
-            ))}
-          </select>
+            options={[
+              { value: '', label: 'All Classes' },
+              ...filteredClasses.map(classItem => ({ value: classItem.id, label: classItem.className || classItem.name }))
+            ]}
+            onChange={(e) => setSelectedClass(e.target.value)}
+          />
+        </div>
+
+        {/* Subject Filter */}
+        <div>
+          <ModernSelect
+            label="Subject"
+            value={selectedSubject}
+            placeholder="All Subjects"
+            searchable={true}
+            required={false}
+            options={[
+              { value: '', label: 'All Subjects' },
+              ...subjects.map(s => ({ value: s.id || s.Id, label: s.statusName || s.subjectName }))
+            ]}
+            onChange={(e) => setSelectedSubject(e.target.value)}
+          />
+        </div>
+
+        {/* Group By Filter */}
+        <div>
+          <ModernSelect
+            label="Group By"
+            value={selectedGroupBy}
+            required={false}
+            options={[
+              { value: 'Student', label: 'Students' },
+              { value: 'Class', label: 'Class' }
+            ]}
+            onChange={(e) => setSelectedGroupBy(e.target.value)}
+          />
         </div>
 
         {/* Start Date Filter */}
         <div>
-          <label style={{
-            display: 'block',
-            fontSize: '0.875rem',
-            fontWeight: '500',
-            color: 'var(--text-secondary)',
-            marginBottom: '0.5rem'
-          }}>
-            Start Date
-          </label>
-          <input
-            type="date"
+          <ModernDatePicker
+            label="Start Date"
             value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
-            style={{
-              width: '100%',
-              padding: '0.625rem',
-              borderRadius: '8px',
-              border: '1px solid var(--border-color)',
-              background: 'var(--bg-surface)',
-              color: 'var(--text-primary)',
-              fontSize: '0.875rem',
-              cursor: 'pointer'
-            }}
+            onChange={(isoString) => setStartDate(isoString)}
+            placeholder="Select Start Date"
+            required={false}
           />
         </div>
 
         {/* End Date Filter */}
         <div>
-          <label style={{
-            display: 'block',
-            fontSize: '0.875rem',
-            fontWeight: '500',
-            color: 'var(--text-secondary)',
-            marginBottom: '0.5rem'
-          }}>
-            End Date
-          </label>
-          <input
-            type="date"
+          <ModernDatePicker
+            label="End Date"
             value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
-            min={startDate}
-            style={{
-              width: '100%',
-              padding: '0.625rem',
-              borderRadius: '8px',
-              border: '1px solid var(--border-color)',
-              background: 'var(--bg-surface)',
-              color: 'var(--text-primary)',
-              fontSize: '0.875rem',
-              cursor: 'pointer'
-            }}
+            onChange={(isoString) => setEndDate(isoString)}
+            placeholder="Select End Date"
+            required={false}
           />
         </div>
-      </div>
 
-      {/* Action Buttons */}
-      <div style={{
-        display: 'flex',
-        gap: '0.75rem',
-        flexWrap: 'wrap'
-      }}>
-        <button
-          onClick={handleApplyFilters}
+        {/* Exam Filter */}
+        {hasExamFilter && (
+          <div style={{ gridColumn: 'span 2' }}> {/* Make it span two columns */}
+            <ModernSelect
+              label="Selected Exam"
+              value={selectedExamId || ''}
+              placeholder="All Exams"
+              searchable={true}
+              required={false}
+              options={[
+                { value: '', label: 'All Exams' },
+                ...filteredExams.map(exam => ({ value: exam.examId || exam.id, label: exam.title }))
+              ]}
+              onChange={(e) => {
+                if (onExamChange) {
+                  onExamChange(e)
+                }
+              }}
+            />
+          </div>
+        )}
+
+        {/* Clear Filters Button */}
+        <div
           style={{
-            padding: '0.625rem 1.5rem',
-            borderRadius: '8px',
-            border: 'none',
-            background: 'var(--primary)',
-            color: 'white',
-            fontSize: '0.875rem',
-            fontWeight: '500',
-            cursor: 'pointer',
-            transition: 'all 0.2s',
-            boxShadow: '0 2px 8px rgba(59, 130, 246, 0.3)'
-          }}
-          onMouseEnter={(e) => {
-            e.target.style.background = 'var(--primary-dark)'
-            e.target.style.transform = 'translateY(-1px)'
-            e.target.style.boxShadow = '0 4px 12px rgba(59, 130, 246, 0.4)'
-          }}
-          onMouseLeave={(e) => {
-            e.target.style.background = 'var(--primary)'
-            e.target.style.transform = 'translateY(0)'
-            e.target.style.boxShadow = '0 2px 8px rgba(59, 130, 246, 0.3)'
+            display: 'flex',
+            justifyContent: 'flex-end',
+            alignItems: 'center',
+            gridColumn: hasExamFilter ? 'span 1' : '1 / -1'
           }}
         >
-          Apply Filters
-        </button>
-
-        <button
-          onClick={handleClearFilters}
-          style={{
-            padding: '0.625rem 1.5rem',
-            borderRadius: '8px',
-            border: '1px solid var(--border-color)',
-            background: 'transparent',
-            color: 'var(--text-secondary)',
-            fontSize: '0.875rem',
-            fontWeight: '500',
-            cursor: 'pointer',
-            transition: 'all 0.2s'
-          }}
-          onMouseEnter={(e) => {
-            e.target.style.background = 'var(--bg-surface-hover)'
-            e.target.style.borderColor = 'var(--text-secondary)'
-          }}
-          onMouseLeave={(e) => {
-            e.target.style.background = 'transparent'
-            e.target.style.borderColor = 'var(--border-color)'
-          }}
-        >
-          Clear Filters
-        </button>
+          <button
+            onClick={handleClearFilters}
+            style={{
+              padding: '0.625rem 1.5rem',
+              borderRadius: '8px',
+              border: '1px solid var(--border-color)',
+              background: 'transparent',
+              color: 'var(--text-secondary)',
+              fontSize: '0.875rem',
+              fontWeight: '500',
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+              height: '48px' // Fixed height
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.background = 'var(--bg-surface-hover)'
+              e.target.style.borderColor = 'var(--text-secondary)'
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.background = 'transparent'
+              e.target.style.borderColor = 'var(--border-color)'
+            }}
+          >
+            Clear Filters
+          </button>
+        </div>
       </div>
 
       {/* Active Filters Summary */}

@@ -24,11 +24,17 @@ export default function StudentPage() {
   const [timeRemaining, setTimeRemaining] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [studentName, setStudentName] = useState('Student')
+  const [userRole, setUserRole] = useState(null)
+  const [completedSearchTerm, setCompletedSearchTerm] = useState('')
   const quizTimerRef = useRef(null)
 
   // Real data from backend
   const [exams, setExams] = useState({ available: [], upcoming: [] })
   const [completedExams, setCompletedExams] = useState([])
+  const [dbGrades, setDbGrades] = useState([])
+  const [dbClasses, setDbClasses] = useState([])
+  const [dbSubjects, setDbSubjects] = useState([])
 
   // Subject metadata (icons + descriptions) used by DashboardView rendering
   const subjectInfo = useMemo(() => ({
@@ -124,74 +130,106 @@ export default function StudentPage() {
           }
         }
 
-        const [examsRes, completedRes] = await Promise.all([
+        const [examsRes, completedRes, lookupRes] = await Promise.all([
           api.get('/examdetail').catch(() => ({ data: [] })),
-          userId ? api.get(`/studentexamanswer/student/${userId}/exams`).catch(() => ({ data: [] })) : Promise.resolve({ data: [] })
+          userId ? api.get(`/studentexamanswer/student/${userId}/exams`).catch(() => ({ data: [] })) : Promise.resolve({ data: [] }),
+          api.get('/dashboard/lookup-data').catch(() => ({ data: { grades: [], classes: [] } }))
         ])
 
         const examsData = examsRes.data || []
         const completedData = completedRes.data || []
 
+        // Set grades, classes, and subjects for filters
+        if (lookupRes.data) {
+          setDbGrades(lookupRes.data.grades || [])
+          setDbClasses(lookupRes.data.classes || [])
+          setDbSubjects(lookupRes.data.subjects || [])
+        }
+
         // Filter exams into categories
         const now = new Date()
-        const completedExamIds = new Set(completedData.map(e => e.examId))
+        const completedExamIds = new Set(completedData.map(e => e.examId ?? e.ExamId).filter(Boolean))
 
         // Helper to check if date is valid
         const isValidDate = (d) => d instanceof Date && !isNaN(d) && d.getFullYear() > 1970
 
-        const availableExams = []
-        const upcomingExams = []
         const expiredExams = []
+        const activeExams = []
+        const upcomingList = []
 
         examsData.forEach(exam => {
-          // Skip if already completed by student
-          if (completedExamIds.has(exam.examId)) return
+          // Robust ID check
+          const eId = exam.examId ?? exam.ExamId
+          if (!eId || completedExamIds.has(eId)) return
 
-          const startDate = exam.startDate ? new Date(exam.startDate) : null
-          const endDate = exam.endDate ? new Date(exam.endDate) : null
+          const startDateRaw = exam.startDate ?? exam.StartDate
+          const endDateRaw = exam.endDate ?? exam.EndDate
+
+          const startDate = startDateRaw ? new Date(startDateRaw) : null
+          const endDate = endDateRaw ? new Date(endDateRaw) : null
 
           // treat null start date as "now" (started)
           const hasStarted = !startDate || !isValidDate(startDate) || startDate <= now
-
           // treat null end date as "never expires" (future)
           const hasExpired = endDate && isValidDate(endDate) && endDate <= now
 
-          // DEBUG LOGGING
-          if (true) {
-            console.log(`Exam: ${exam.title} (ID: ${exam.examId})`)
-            console.log(`  Raw Start: ${exam.startDate}, Parsed: ${startDate}`)
-            console.log(`  Raw End: ${exam.endDate}, Parsed: ${endDate}`)
-            console.log(`  Now: ${now}`)
-            console.log(`  hasStarted: ${hasStarted}, hasExpired: ${hasExpired}`)
-            console.log(`  In CompletedData: ${completedExamIds.has(exam.examId)}`)
-          }
+          // Debugging log (only uncomment if timing issues persist)
+          // console.log(`[Exam ${exam.examId}] EndDate: ${endDate?.toISOString()} | Now: ${now.toISOString()} | Expired: ${hasExpired}`);
 
           if (hasExpired) {
             expiredExams.push(exam)
           } else if (hasStarted) {
-            availableExams.push(exam)
+            activeExams.push(exam)
           } else {
-            // Not started yet
-            upcomingExams.push(exam)
+            upcomingList.push(exam)
           }
         })
 
-        // Add expired exams to completed if they're not already there
-        const expiredCompleted = expiredExams.map(exam => ({
+        // Map missed exams to look like completed entries but with 0 score
+        const missedExams = expiredExams.map(exam => ({
           examId: exam.examId,
           title: exam.title,
-          examSubject: exam.examSubject || '',
+          name: exam.title,
+          subject: exam.subjectName || exam.SubjectName || exam.examSubject || exam.ExamSubject || 'General',
           examDescription: exam.examDescription,
           startDate: exam.startDate,
           endDate: exam.endDate,
           totalMarks: exam.questions?.reduce((sum, q) => sum + (q.mark || 0), 0) || 0,
           earnedMarks: 0,
           score: 0,
+          isMissed: true, // Flag for UI
           questions: exam.questions || []
         }))
 
-        setExams({ available: availableExams, upcoming: upcomingExams })
-        setCompletedExams([...completedData, ...expiredCompleted.filter(e => !completedExamIds.has(e.examId))])
+        setExams({ 
+          available: activeExams.map(exam => ({
+            ...exam,
+            id: exam.examId,
+            name: exam.title,
+            title: exam.title,
+            subject: exam.subjectName || exam.SubjectName || exam.examSubject || exam.ExamSubject || 'General',
+            deadline: exam.endDate,
+            startDate: exam.startDate,
+            duration: 60
+          })), 
+          upcoming: upcomingList.map(exam => ({
+            ...exam,
+            id: exam.examId,
+            name: exam.title,
+            title: exam.title,
+            subject: exam.subjectName || exam.SubjectName || exam.examSubject || exam.ExamSubject || 'General',
+            deadline: exam.endDate,
+            startDate: exam.startDate,
+            duration: 60
+          })) 
+        })
+
+        // Merge actual taken exams with missed exams
+        const mappedCompleted = completedData.map(exam => ({
+          ...exam,
+          subject: exam.subjectName || exam.SubjectName || exam.examSubject || exam.ExamSubject || 'General'
+        }))
+        setCompletedExams([...mappedCompleted, ...missedExams])
 
       } catch (err) {
         console.error('Error fetching exams:', err)
@@ -249,6 +287,31 @@ export default function StudentPage() {
       }
     })
   }
+
+  // Authentication & Authorization
+  useEffect(() => {
+    const token = storage.getItem('token')
+    const storedUserRole = storage.getItem('userRole')
+    setUserRole(storedUserRole)
+
+    if (!token) {
+      navigate('/')
+    } else {
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1] || ''))
+        const userId = payload.sub || payload.id
+        if (userId) {
+          api.get(`/auth/profile/${userId}`).then(res => {
+            if (res.data && (res.data.fullNameEn || res.data.fullNameAr)) {
+              setStudentName(res.data.fullNameEn || res.data.fullNameAr)
+            }
+          }).catch(err => console.error("Failed to fetch profile", err))
+        }
+      } catch (e) {
+        console.error('Error parsing token:', e)
+      }
+    }
+  }, [navigate])
 
   // Timer logic
   useEffect(() => {
@@ -650,8 +713,10 @@ export default function StudentPage() {
 
       return {
         id: exam.examId,
+        id: exam.examId,
         name: exam.title,
-        subject: exam.examSubject || 'General',
+        title: exam.title,
+        subject: exam.subjectName || exam.examSubject || 'General',
         deadline: exam.endDate,
         startDate: exam.startDate,
         duration: 60, // Default duration, could be added to backend
@@ -659,8 +724,8 @@ export default function StudentPage() {
       }
     })
 
-    const available = processExamList(exams.available)
-    const upcoming = processExamList(exams.upcoming)
+    const available = processExamList(exams.available).sort((a, b) => new Date(b.deadline || b.startDate) - new Date(a.deadline || a.startDate))
+    const upcoming = processExamList(exams.upcoming).sort((a, b) => new Date(a.startDate) - new Date(b.startDate))
 
     const completed = completedExams.map(exam => {
       const questions = (exam.questions || []).map(q => {
@@ -691,19 +756,30 @@ export default function StudentPage() {
       })
 
       return {
+        ...exam,
         id: exam.examId,
-        name: exam.title,
-        subject: exam.examSubject,
+        title: exam.title || exam.Title || 'Untitled Exam',
+        subject: exam.subjectName || exam.examSubject || exam.subject || 'General',
         deadline: exam.endDate,
-        score: exam.score || 0,
-        totalMarks: exam.totalMarks || 0,
-        earnedMarks: exam.earnedMarks || 0,
         questions: questions
       }
     })
 
-    return { available, upcoming, completed }
-  }, [exams, completedExams])
+    const filteredCompleted = completed.filter(exam =>
+      exam.title.toLowerCase().includes(completedSearchTerm.toLowerCase()) ||
+      (exam.examSubject || '').toLowerCase().includes(completedSearchTerm.toLowerCase())
+    )
+
+    return {
+      available,
+      upcoming,
+      completed: filteredCompleted.sort((a, b) => {
+        const dateA = new Date(a.deadline || 0);
+        const dateB = new Date(b.deadline || 0);
+        return dateB - dateA;
+      })
+    }
+  }, [exams, completedExams, completedSearchTerm])
 
   return (
     <div className="dashboard-container" style={{ display: 'flex', minHeight: '100vh' }}>
@@ -713,9 +789,14 @@ export default function StudentPage() {
         showSection={showSection}
         handleLogout={handleLogout}
         userRole="Student"
+        availableExamsCount={examData.available.length}
       />
 
-      <div className="main-content">
+      <div className="main-content section-transition" style={{
+        flex: 1,
+        overflowY: 'auto',
+        background: currentSection === 'profile' ? 'yellow' : 'var(--bg-surface)'
+      }}>
         {loading ? (
           <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
             <div style={{ marginBottom: '2rem' }}>
@@ -829,83 +910,246 @@ export default function StudentPage() {
             </div>
           </div>
         ) : (
-          <>
-
-            {/* Dashboard Section */}
-            {currentSection === 'dashboard' && (
-              <UnifiedDashboard
-                userRole="Student"
-                userId={(() => {
-                  const token = storage.getItem('token')
-                  if (token) {
-                    try {
-                      const payload = JSON.parse(atob(token.split('.')[1]))
-                      return payload.sub || payload.id
-                    } catch (e) {
-                      console.error('Error parsing token:', e)
-                    }
-                  }
-                  return null
-                })()}
-              />
-            )}
-
-            {/* Profile Section */}
-            {currentSection === 'profile' && (
-              <UserProfile
-                userRole="Student"
-                onBack={() => showSection('available')}
-              />
-            )}
-
-            {/* Dashboard View */}
-            {currentSection === 'available' && (
-              <div style={{ padding: '2rem', background: 'var(--bg-surface)', minHeight: '100vh' }}>
-                <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-                  <div className="content-header" style={{ marginBottom: '2rem' }}>
-                    <h1 style={{ fontSize: '2rem', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                      <svg style={{ width: '32px', height: '32px', fill: 'var(--primary)' }} viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" /></svg>
-                      Available Exams
-                    </h1>
-                    <p style={{ fontSize: '1rem', color: 'var(--text-secondary)', margin: 0 }}>
-                      Select an exam to start. Good luck!
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+            {/* Welcome Card */}
+            {currentSection !== 'profile' && (
+              <div style={{ padding: '1.5rem 2rem 0' }}>
+                <div style={{
+                  background: 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)',
+                  padding: '1.5rem 2rem',
+                  borderRadius: '16px',
+                  color: 'white',
+                  boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  marginBottom: '1rem'
+                }}>
+                  <div>
+                    <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 700 }}>Hello, {studentName}! 👋</h2>
+                    <p style={{ margin: '0.25rem 0 0', fontSize: '0.9rem', color: 'rgba(255,255,255,0.9)' }}>
+                      You are logged in as a <span style={{ color: '#ffffff', fontWeight: 700, textDecoration: 'underline', textUnderlineOffset: '4px', textDecorationColor: 'rgba(255,255,255,0.4)' }}>{userRole || 'Student'}</span>
                     </p>
                   </div>
+                  <div style={{
+                    background: 'rgba(255,255,255,0.1)',
+                    padding: '0.75rem',
+                    borderRadius: '12px',
+                    border: '1px solid rgba(255,255,255,0.2)',
+                    textAlign: 'right'
+                  }}>
+                    <div style={{ fontSize: '0.8rem', fontWeight: 600, opacity: 0.7 }}>{new Date().toLocaleDateString('en-US', { weekday: 'long' })}</div>
+                    <div style={{ fontSize: '1rem', fontWeight: 700 }}>{new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</div>
+                  </div>
+                </div>
+              </div>
+            )}
+            <>
 
-                  {/* Available Exams */}
-                  {exams.available.length === 0 && exams.upcoming.length === 0 ? (
-                    <div style={{
-                      background: 'var(--bg-main)',
-                      borderRadius: '16px',
-                      padding: '4rem 2rem',
-                      textAlign: 'center',
-                      boxShadow: 'var(--shadow-sm)'
-                    }}>
-                      <svg style={{ width: '80px', height: '80px', fill: 'var(--text-light)', margin: '0 auto 1.5rem' }} viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" /></svg>
-                      <h3 style={{ fontSize: '1.5rem', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
-                        No exams available
-                      </h3>
+              {/* Dashboard Section */}
+              {currentSection === 'dashboard' && (
+                <UnifiedDashboard
+                  userRole="Student"
+                  userId={(() => {
+                    const token = storage.getItem('token')
+                    if (token) {
+                      try {
+                        const payload = JSON.parse(atob(token.split('.')[1]))
+                        return payload.sub || payload.id
+                      } catch (e) {
+                        console.error('Error parsing token:', e)
+                      }
+                    }
+                    return null
+                  })()}
+                  allExams={[...exams.available, ...exams.upcoming]}
+                  grades={dbGrades}
+                  classes={dbClasses}
+                  subjects={dbSubjects}
+                />
+              )}
+
+              {/* Profile Section */}
+              {currentSection === 'profile' && (
+                <UserProfile
+                  userRole="Student"
+                  onBack={() => showSection('available')}
+                />
+              )}
+
+              {/* Dashboard View */}
+              {currentSection === 'available' && (
+                <div style={{ padding: '2rem', background: 'var(--bg-surface)', minHeight: '100vh' }}>
+                  <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
+                    <div className="content-header" style={{ marginBottom: '2rem' }}>
+                      <h1 style={{ fontSize: '2rem', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                        <svg style={{ width: '32px', height: '32px', fill: 'var(--primary)' }} viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" /></svg>
+                        Available Exams
+                      </h1>
                       <p style={{ fontSize: '1rem', color: 'var(--text-secondary)', margin: 0 }}>
-                        There are no exams available at the moment. Check back later!
+                        Select an exam to start. Good luck!
                       </p>
                     </div>
-                  ) : (
-                    <>
-                      {/* Available Section */}
-                      {exams.available.length > 0 && (
-                        <div style={{ marginBottom: '3rem' }}>
-                          <h2 style={{ fontSize: '1.5rem', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--success)', display: 'inline-block' }}></span>
-                            Active Now
-                          </h2>
-                          <div style={{
-                            display: 'grid',
-                            gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
-                            gap: '1.5rem'
-                          }}>
-                            {exams.available.map((exam) => {
-                              const timeUntil = getTimeUntilDeadline(exam.deadline || exam.endDate)
-                              return (
+
+                    {/* Available Exams */}
+                    {exams.available.length === 0 && exams.upcoming.length === 0 ? (
+                      <div style={{
+                        background: 'var(--bg-main)',
+                        borderRadius: '16px',
+                        padding: '4rem 2rem',
+                        textAlign: 'center',
+                        boxShadow: 'var(--shadow-sm)'
+                      }}>
+                        <svg style={{ width: '80px', height: '80px', fill: 'var(--text-light)', margin: '0 auto 1.5rem' }} viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" /></svg>
+                        <h3 style={{ fontSize: '1.5rem', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
+                          No exams available
+                        </h3>
+                        <p style={{ fontSize: '1rem', color: 'var(--text-secondary)', margin: 0 }}>
+                          There are no exams available at the moment. Check back later!
+                        </p>
+                      </div>
+                    ) : (
+                      <>
+                        {/* Available Section */}
+                        {exams.available.length > 0 && (
+                          <div style={{ marginBottom: '3rem' }}>
+                            <h2 style={{ fontSize: '1.5rem', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--success)', display: 'inline-block' }}></span>
+                              Active Now
+                            </h2>
+                            <div style={{
+                              display: 'grid',
+                              gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+                              gap: '1.5rem'
+                            }}>
+                              {exams.available.map((exam) => {
+                                const timeUntil = getTimeUntilDeadline(exam.deadline || exam.endDate)
+                                return (
+                                  <div
+                                    key={exam.examId}
+                                    className="exam-card"
+                                    style={{
+                                      background: 'var(--bg-main)',
+                                      borderRadius: 'var(--radius-lg)',
+                                      padding: '1.5rem',
+                                      boxShadow: 'var(--shadow-md)',
+                                      borderLeft: '4px solid var(--primary)',
+                                      transition: 'all var(--transition-base)',
+                                      cursor: 'pointer',
+                                      position: 'relative',
+                                      overflow: 'hidden'
+                                    }}
+                                    onClick={() => startExam(exam)}
+                                    onMouseEnter={(e) => {
+                                      e.currentTarget.style.transform = 'translateY(-4px)'
+                                      e.currentTarget.style.boxShadow = 'var(--shadow-xl)'
+                                    }}
+                                    onMouseLeave={(e) => {
+                                      e.currentTarget.style.transform = 'translateY(0)'
+                                      e.currentTarget.style.boxShadow = 'var(--shadow-md)'
+                                    }}
+                                  >
+                                    {/* Random Questions Badge */}
+                                    <div style={{
+                                      position: 'absolute',
+                                      top: '1rem',
+                                      right: '1rem',
+                                      background: 'linear-gradient(135deg, var(--accent), var(--primary))',
+                                      color: 'white',
+                                      padding: '0.25rem 0.75rem',
+                                      borderRadius: 'var(--radius-full)',
+                                      fontSize: '0.75rem',
+                                      fontWeight: '700',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '0.25rem',
+                                      boxShadow: 'var(--shadow-sm)'
+                                    }}>
+                                      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z" />
+                                      </svg>
+                                      Randomized
+                                    </div>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem', marginTop: '1.5rem', gap: '1rem' }}>
+                                      <div style={{ flex: 1, minWidth: 0 }}>
+                                        <h3 style={{ 
+                                          fontSize: '1.25rem', 
+                                          fontWeight: '700', 
+                                          color: 'var(--text-primary)', 
+                                          margin: '0 0 0.5rem 0',
+                                          display: '-webkit-box',
+                                          WebkitLineClamp: 2,
+                                          WebkitBoxOrient: 'vertical',
+                                          overflow: 'hidden',
+                                          wordBreak: 'break-word'
+                                        }}>
+                                          {exam.title} <span style={{ fontSize: '0.8rem', opacity: 0.5, fontWeight: 'normal' }}>(#{exam.examId})</span>
+                                        </h3>
+                                      </div>
+                                      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                                        {exam.isExpired && (
+                                          <div style={{ background: '#fee2e2', color: '#ef4444', padding: '0.25rem 0.75rem', borderRadius: '999px', fontSize: '0.75rem', fontWeight: '700', border: '1px solid #f87171' }}>
+                                            EXPIRED
+                                          </div>
+                                        )}
+                                        <div style={{ background: 'var(--primary-light)', color: 'var(--primary)', padding: '0.25rem 0.75rem', borderRadius: '999px', fontSize: '0.75rem', fontWeight: '700' }}>
+                                          {exam.questions ? exam.questions.length : 0} Qs
+                                        </div>
+                                        <div style={{ background: '#fef3c7', color: '#92400e', padding: '0.25rem 0.75rem', borderRadius: '999px', fontSize: '0.75rem', fontWeight: '700' }}>
+                                          {exam.subject}
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '1.5rem', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                                      {exam.examDescription}
+                                    </p>
+
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', color: exam.isExpired ? 'var(--text-light)' : 'var(--text-secondary)' }}>
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z" /><path d="M12.5 7H11v6l5.25 3.15.75-1.23-4.5-2.67z" /></svg>
+                                        {exam.isExpired ? 'Expired' : (timeUntil ? `Ends in ${timeUntil}` : 'Ends soon')}
+                                      </div>
+                                      <button 
+                                        onClick={() => !exam.isExpired && startExam(exam)}
+                                        disabled={exam.isExpired}
+                                        style={{
+                                          background: exam.isExpired ? 'var(--bg-light)' : 'var(--primary)',
+                                          color: exam.isExpired ? 'var(--text-light)' : 'white',
+                                          border: 'none',
+                                          padding: '0.5rem 1.25rem',
+                                          borderRadius: '8px',
+                                          fontWeight: '600',
+                                          cursor: exam.isExpired ? 'not-allowed' : 'pointer',
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          gap: '0.5rem'
+                                        }}
+                                      >
+                                        {exam.isExpired ? 'Time Over' : 'Start'} 
+                                        {!exam.isExpired && <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>}
+                                      </button>
+                                    </div>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Upcoming Section */}
+                        {exams.upcoming.length > 0 && (
+                          <div>
+                            <h2 style={{ fontSize: '1.5rem', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                              <svg width="24" height="24" viewBox="0 0 24 24" fill="var(--warning)"><path d="M22 5.72l-4.6-3.86-1.29 1.53 4.6 3.86L22 5.72zM7.88 3.39L6.6 1.86 2 5.71l1.29 1.53 4.59-3.85zM12.5 8H11v6l4.75 2.85.75-1.23-4-2.37V8zM12 4c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9-4.03-9-9-9zm0 16c-3.86 0-7-3.14-7-7s3.14-7 7-7 7 3.14 7 7-3.14 7-7 7z" /></svg>
+                              Upcoming
+                            </h2>
+                            <div style={{
+                              display: 'grid',
+                              gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+                              gap: '1.5rem'
+                            }}>
+                              {exams.upcoming.map((exam) => (
                                 <div
                                   key={exam.examId}
                                   className="exam-card"
@@ -913,268 +1157,282 @@ export default function StudentPage() {
                                     background: 'var(--bg-main)',
                                     borderRadius: 'var(--radius-lg)',
                                     padding: '1.5rem',
-                                    boxShadow: 'var(--shadow-md)',
-                                    borderLeft: '4px solid var(--primary)',
-                                    transition: 'all var(--transition-base)',
-                                    cursor: 'pointer',
-                                    position: 'relative',
-                                    overflow: 'hidden'
-                                  }}
-                                  onClick={() => startExam(exam)}
-                                  onMouseEnter={(e) => {
-                                    e.currentTarget.style.transform = 'translateY(-4px)'
-                                    e.currentTarget.style.boxShadow = 'var(--shadow-xl)'
-                                  }}
-                                  onMouseLeave={(e) => {
-                                    e.currentTarget.style.transform = 'translateY(0)'
-                                    e.currentTarget.style.boxShadow = 'var(--shadow-md)'
+                                    boxShadow: 'var(--shadow-sm)',
+                                    borderLeft: '4px solid var(--warning)',
+                                    opacity: 0.9
                                   }}
                                 >
-                                  {/* Random Questions Badge */}
-                                  <div style={{
-                                    position: 'absolute',
-                                    top: '1rem',
-                                    right: '1rem',
-                                    background: 'linear-gradient(135deg, var(--accent), var(--primary))',
-                                    color: 'white',
-                                    padding: '0.25rem 0.75rem',
-                                    borderRadius: 'var(--radius-full)',
-                                    fontSize: '0.75rem',
-                                    fontWeight: '700',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '0.25rem',
-                                    boxShadow: 'var(--shadow-sm)'
-                                  }}>
-                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                                      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z" />
-                                    </svg>
-                                    Randomized
-                                  </div>
-                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem', marginTop: '1.5rem' }}>
-                                    <div>
-                                      <h3 style={{ fontSize: '1.25rem', fontWeight: '700', color: 'var(--text-primary)', margin: '0 0 0.5rem 0' }}>{exam.title} <span style={{ fontSize: '0.8rem', opacity: 0.5 }}>(#{exam.examId})</span></h3>
-                                      <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', margin: 0 }}>{exam.examSubject || 'General'}</p>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem', gap: '1rem' }}>
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                      <h3 style={{ 
+                                        fontSize: '1.25rem', 
+                                        fontWeight: '700', 
+                                        color: 'var(--text-primary)', 
+                                        margin: '0',
+                                        display: '-webkit-box',
+                                        WebkitLineClamp: 2,
+                                        WebkitBoxOrient: 'vertical',
+                                        overflow: 'hidden',
+                                        wordBreak: 'break-word'
+                                      }}>
+                                        {exam.title}
+                                      </h3>
                                     </div>
-                                    <div style={{ background: 'var(--primary-light)', color: 'var(--primary)', padding: '0.25rem 0.75rem', borderRadius: '999px', fontSize: '0.75rem', fontWeight: '700' }}>
-                                      {exam.questions ? exam.questions.length : 0} Qs
+                                    <div style={{ flexShrink: 0 }}>
+                                      <div style={{ display: 'inline-block', background: '#fef3c7', color: '#92400e', padding: '0.2rem 0.6rem', borderRadius: '999px', fontSize: '0.7rem', fontWeight: '700' }}>
+                                        {exam.subject}
+                                      </div>
                                     </div>
                                   </div>
-
-                                  <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '1.5rem', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                                  <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', margin: '1rem 0' }}>
                                     {exam.examDescription}
                                   </p>
-
-                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-                                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z" /><path d="M12.5 7H11v6l5.25 3.15.75-1.23-4.5-2.67z" /></svg>
-                                      {timeUntil ? `Ends in ${timeUntil}` : 'Ends soon'}
-                                    </div>
-                                    <button style={{
-                                      background: 'var(--primary)',
-                                      color: 'white',
-                                      border: 'none',
-                                      padding: '0.5rem 1.25rem',
-                                      borderRadius: '8px',
-                                      fontWeight: '600',
-                                      cursor: 'pointer',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      gap: '0.5rem'
-                                    }}>
-                                      Start <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
-                                    </button>
+                                  <div style={{
+                                    padding: '0.75rem',
+                                    background: 'var(--warning-bg)',
+                                    color: 'var(--warning-dark)',
+                                    borderRadius: '8px',
+                                    fontSize: '0.875rem',
+                                    fontWeight: '600',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.5rem'
+                                  }}>
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z" /><path d="M12.5 7H11v6l5.25 3.15.75-1.23-4.5-2.67z" /></svg>
+                                    Starts: {new Date(exam.startDate).toLocaleString()}
                                   </div>
                                 </div>
-                              )
-                            })}
+                              ))}
+                            </div>
                           </div>
-                        </div>
-                      )}
-
-                      {/* Upcoming Section */}
-                      {exams.upcoming.length > 0 && (
-                        <div>
-                          <h2 style={{ fontSize: '1.5rem', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="var(--warning)"><path d="M22 5.72l-4.6-3.86-1.29 1.53 4.6 3.86L22 5.72zM7.88 3.39L6.6 1.86 2 5.71l1.29 1.53 4.59-3.85zM12.5 8H11v6l4.75 2.85.75-1.23-4-2.37V8zM12 4c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9-4.03-9-9-9zm0 16c-3.86 0-7-3.14-7-7s3.14-7 7-7 7 3.14 7 7-3.14 7-7 7z" /></svg>
-                            Upcoming
-                          </h2>
-                          <div style={{
-                            display: 'grid',
-                            gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
-                            gap: '1.5rem'
-                          }}>
-                            {exams.upcoming.map((exam) => (
-                              <div
-                                key={exam.examId}
-                                className="exam-card"
-                                style={{
-                                  background: 'var(--bg-main)',
-                                  borderRadius: 'var(--radius-lg)',
-                                  padding: '1.5rem',
-                                  boxShadow: 'var(--shadow-sm)',
-                                  borderLeft: '4px solid var(--warning)',
-                                  opacity: 0.9
-                                }}
-                              >
-                                <div>
-                                  <h3 style={{ fontSize: '1.25rem', fontWeight: '700', color: 'var(--text-primary)', margin: '0 0 0.5rem 0' }}>{exam.title}</h3>
-                                  <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', margin: 0 }}>{exam.examSubject || 'General'}</p>
-                                </div>
-                                <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', margin: '1rem 0' }}>
-                                  {exam.examDescription}
-                                </p>
-                                <div style={{
-                                  padding: '0.75rem',
-                                  background: 'var(--warning-bg)',
-                                  color: 'var(--warning-dark)',
-                                  borderRadius: '8px',
-                                  fontSize: '0.875rem',
-                                  fontWeight: '600',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '0.5rem'
-                                }}>
-                                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z" /><path d="M12.5 7H11v6l5.25 3.15.75-1.23-4.5-2.67z" /></svg>
-                                  Starts: {new Date(exam.startDate).toLocaleString()}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Completed Exams */}
-            {currentSection === 'completed' && (
-              <div style={{ padding: '2rem', background: 'var(--bg-surface)', minHeight: '100vh' }}>
-                <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-                  <div className="content-header" style={{ marginBottom: '2rem' }}>
-                    <h1 style={{ fontSize: '2rem', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                      <svg style={{ width: '32px', height: '32px', fill: 'var(--success)' }} viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" /></svg>
-                      Completed Exams
-                    </h1>
-                    <p style={{ fontSize: '1rem', color: 'var(--text-secondary)', margin: 0 }}>
-                      Review your past performance and scores.
-                    </p>
+                        )}
+                      </>
+                    )}
                   </div>
+                </div>
+              )}
 
-                  {completedExams.length === 0 ? (
-                    <div style={{
-                      background: 'var(--bg-main)',
-                      borderRadius: '16px',
-                      padding: '4rem 2rem',
-                      textAlign: 'center',
-                      boxShadow: 'var(--shadow-sm)'
-                    }}>
-                      <svg style={{ width: '80px', height: '80px', fill: 'var(--text-light)', margin: '0 auto 1.5rem' }} viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" /></svg>
-                      <h3 style={{ fontSize: '1.5rem', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
-                        No Completed Exams
-                      </h3>
+              {/* Completed Exams */}
+              {currentSection === 'completed' && (
+                <div style={{ padding: '2rem', background: 'var(--bg-surface)', minHeight: '100vh' }}>
+                  <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
+                    <div className="content-header" style={{ marginBottom: '2rem' }}>
+                      <h1 style={{ fontSize: '2rem', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                        <svg style={{ width: '32px', height: '32px', fill: 'var(--success)' }} viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" /></svg>
+                        Completed Exams
+                      </h1>
                       <p style={{ fontSize: '1rem', color: 'var(--text-secondary)', margin: 0 }}>
-                        You haven't completed any exams yet. Check the Available Exams section to get started!
+                        Review your past performance and scores.
                       </p>
                     </div>
-                  ) : (
-                    <div style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
-                      gap: '1.5rem'
-                    }}>
-                      {completedExams.map((exam) => (
-                        <div
-                          key={exam.examId}
-                          className="exam-card"
+
+                    {/* Search Bar */}
+                    <div style={{ marginBottom: '2rem', position: 'relative' }}>
+                      <input
+                        type="text"
+                        placeholder="Search completed exams by title or subject..."
+                        value={completedSearchTerm}
+                        onChange={(e) => setCompletedSearchTerm(e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '1rem 1rem 1rem 3.5rem',
+                          borderRadius: '12px',
+                          border: '2px solid var(--border-color)',
+                          background: 'var(--bg-main)',
+                          color: 'var(--text-primary)',
+                          fontSize: '1rem',
+                          outline: 'none',
+                          transition: 'all 0.2s ease',
+                          boxShadow: 'var(--shadow-sm)'
+                        }}
+                        onFocus={(e) => {
+                          e.target.style.borderColor = 'var(--primary)'
+                          e.target.style.boxShadow = 'var(--shadow-md)'
+                        }}
+                        onBlur={(e) => {
+                          e.target.style.borderColor = 'var(--border-color)'
+                          e.target.style.boxShadow = 'var(--shadow-sm)'
+                        }}
+                      />
+                      <svg
+                        style={{
+                          position: 'absolute',
+                          left: '1.25rem',
+                          top: '50%',
+                          transform: 'translateY(-50%)',
+                          width: '24px',
+                          height: '24px',
+                          fill: 'var(--text-secondary)',
+                          pointerEvents: 'none'
+                        }}
+                        viewBox="0 0 24 24"
+                      >
+                        <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
+                      </svg>
+                      {completedSearchTerm && (
+                        <button
+                          onClick={() => setCompletedSearchTerm('')}
                           style={{
-                            background: 'var(--bg-main)',
-                            borderRadius: '16px',
-                            padding: '1.5rem',
-                            boxShadow: 'var(--shadow-md)',
-                            borderLeft: '4px solid var(--success)',
-                            transition: 'transform 0.2s ease, box-shadow 0.2s ease',
-                            cursor: 'pointer'
-                          }}
-                          onClick={() => reviewExam(exam)}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.transform = 'translateY(-4px)'
-                            e.currentTarget.style.boxShadow = 'var(--shadow-lg)'
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.transform = 'translateY(0)'
-                            e.currentTarget.style.boxShadow = 'var(--shadow-md)'
+                            position: 'absolute',
+                            right: '1.25rem',
+                            top: '50%',
+                            transform: 'translateY(-50%)',
+                            background: 'none',
+                            border: 'none',
+                            cursor: 'pointer',
+                            padding: '4px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            color: 'var(--text-secondary)',
+                            hover: { color: 'var(--text-primary)' }
                           }}
                         >
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
-                            <div>
-                              <h3 style={{ fontSize: '1.25rem', fontWeight: '700', color: 'var(--text-primary)', margin: '0 0 0.5rem 0' }}>{exam.title} <span style={{ fontSize: '0.8rem', opacity: 0.5 }}>(#{exam.examId})</span></h3>
-                              <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', margin: 0 }}>{exam.examSubject || 'General'}</p>
-                            </div>
-                            <div style={{ background: 'var(--success-bg)', color: 'var(--success)', padding: '0.25rem 0.75rem', borderRadius: '999px', fontSize: '0.75rem', fontWeight: '700' }}>
-                              {Math.round((exam.score || 0) * 100) / 100}%
-                            </div>
-                          </div>
-
-                          <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '1.5rem', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                            {exam.examDescription}
-                          </p>
-
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-                              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" /></svg>
-                              Completed
-                            </div>
-                            <button style={{
-                              background: 'var(--bg-surface)',
-                              color: 'var(--text-primary)',
-                              border: '1px solid var(--border-color)',
-                              padding: '0.5rem 1.25rem',
-                              borderRadius: '8px',
-                              fontWeight: '600',
-                              cursor: 'pointer',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '0.5rem'
-                            }}>
-                              Review <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z" /></svg>
-                            </button>
-                          </div>
-                        </div>
-                      ))}
+                          <svg style={{ width: '20px', height: '20px', fill: 'currentColor' }} viewBox="0 0 24 24">
+                            <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
+                          </svg>
+                        </button>
+                      )}
                     </div>
-                  )}
-                </div>
-              </div>
-            )}
 
-            {/* Quiz Interface */}
-            {currentSection === 'quiz' && currentExam && (
-              <QuizInterface
-                currentQuiz={currentExam}
-                isReviewMode={isReviewMode}
-                formatTimerDisplay={(seconds) => {
-                  const hours = Math.floor(seconds / 3600)
-                  const minutes = Math.floor((seconds % 3600) / 60)
-                  const secs = seconds % 60
-                  if (hours > 0) {
-                    return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
-                  }
-                  return `${minutes}:${secs.toString().padStart(2, '0')}`
-                }}
-                timeRemaining={timeRemaining}
-                submitQuiz={submitExam}
-                backToDashboard={isReviewMode ? backToCompleted : () => {
-                  setIsExamActive(false)
-                  setCurrentSection('available')
-                  setCurrentExam(null)
-                  setTimeRemaining(0)
-                }}
-              />
-            )}
-          </>
+                    {examData.completed.length === 0 ? (
+                      <div style={{
+                        background: 'var(--bg-main)',
+                        borderRadius: '16px',
+                        padding: '4rem 2rem',
+                        textAlign: 'center',
+                        boxShadow: 'var(--shadow-sm)'
+                      }}>
+                        <svg style={{ width: '80px', height: '80px', fill: 'var(--text-light)', margin: '0 auto 1.5rem' }} viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" /></svg>
+                        <h3 style={{ fontSize: '1.5rem', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
+                          No Completed Exams
+                        </h3>
+                        <p style={{ fontSize: '1rem', color: 'var(--text-secondary)', margin: 0 }}>
+                          You haven't completed any exams yet. Check the Available Exams section to get started!
+                        </p>
+                      </div>
+                    ) : (
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+                        gap: '1.5rem'
+                      }}>
+                        {examData.completed.map((exam) => (
+                          <div
+                            key={exam.examId}
+                            className="exam-card"
+                            style={{
+                              background: 'var(--bg-main)',
+                              borderRadius: '16px',
+                              padding: '1.5rem',
+                              boxShadow: 'var(--shadow-md)',
+                              borderLeft: '4px solid var(--success)',
+                              transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+                              cursor: 'pointer'
+                            }}
+                            onClick={() => reviewExam(exam)}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.transform = 'translateY(-4px)'
+                              e.currentTarget.style.boxShadow = 'var(--shadow-lg)'
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.transform = 'translateY(0)'
+                              e.currentTarget.style.boxShadow = 'var(--shadow-md)'
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem', gap: '1rem' }}>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <h3 style={{ 
+                                  fontSize: '1.25rem', 
+                                  fontWeight: '700', 
+                                  color: 'var(--text-primary)', 
+                                  margin: '0 0 0.5rem 0',
+                                  display: '-webkit-box',
+                                  WebkitLineClamp: 2,
+                                  WebkitBoxOrient: 'vertical',
+                                  overflow: 'hidden',
+                                  wordBreak: 'break-word'
+                                }}>
+                                  {exam.title} <span style={{ fontSize: '0.8rem', opacity: 0.5, fontWeight: 'normal' }}>(#{exam.examId})</span>
+                                </h3>
+                                <div style={{ display: 'inline-block', background: '#fef3c7', color: '#92400e', padding: '0.2rem 0.6rem', borderRadius: '999px', fontSize: '0.7rem', fontWeight: '700' }}>
+                                  {exam.subject}
+                                </div>
+                              </div>
+                              <div style={{ 
+                                background: exam.isMissed ? '#fee2e2' : 'var(--success-bg)', 
+                                color: exam.isMissed ? '#ef4444' : 'var(--success)', 
+                                padding: '0.25rem 0.75rem', 
+                                borderRadius: '999px', 
+                                fontSize: '0.75rem', 
+                                fontWeight: '700' 
+                              }}>
+                                {exam.isMissed ? '0%' : (Math.round((exam.score || 0) * 100) / 100 + '%')}
+                              </div>
+                            </div>
+
+                            <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '1.5rem', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                              {exam.examDescription}
+                            </p>
+
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', color: exam.isMissed ? '#ef4444' : 'var(--text-secondary)' }}>
+                                {exam.isMissed ? (
+                                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z" /></svg>
+                                ) : (
+                                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" /></svg>
+                                )}
+                                {exam.isMissed ? 'Missed' : 'Completed'}
+                              </div>
+                              <button style={{
+                                background: 'var(--bg-surface)',
+                                color: 'var(--text-primary)',
+                                border: '1px solid var(--border-color)',
+                                padding: '0.5rem 1.25rem',
+                                borderRadius: '8px',
+                                fontWeight: '600',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.5rem'
+                              }}>
+                                Review <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z" /></svg>
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Quiz Interface */}
+              {currentSection === 'quiz' && currentExam && (
+                <QuizInterface
+                  currentQuiz={currentExam}
+                  isReviewMode={isReviewMode}
+                  formatTimerDisplay={(seconds) => {
+                    const hours = Math.floor(seconds / 3600)
+                    const minutes = Math.floor((seconds % 3600) / 60)
+                    const secs = seconds % 60
+                    if (hours > 0) {
+                      return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+                    }
+                    return `${minutes}:${secs.toString().padStart(2, '0')}`
+                  }}
+                  timeRemaining={timeRemaining}
+                  submitQuiz={submitExam}
+                  backToDashboard={isReviewMode ? backToCompleted : () => {
+                    setIsExamActive(false)
+                    setCurrentSection('available')
+                    setCurrentExam(null)
+                    setTimeRemaining(0)
+                  }}
+                />
+              )}
+            </>
+          </div>
         )}
       </div>
 

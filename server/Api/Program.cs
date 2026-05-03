@@ -17,15 +17,26 @@ namespace QuizesApi
             var builder = WebApplication.CreateBuilder(args);
 
             // Add services to the container BEFORE building the app
-            builder.Services.AddControllers();
+            builder.Services.AddControllers()
+                .AddJsonOptions(options => {
+                    options.JsonSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
+                    options.JsonSerializerOptions.DictionaryKeyPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
+                });
 
             // Swagger/OpenAPI
             builder.Services.AddEndpointsApiExplorer();
             builder.Services.AddSwaggerGen();
 
             // Database context
-            builder.Services.AddDbContext<ElsewedySchoolContext>(options =>
+            // Database context
+            builder.Services.AddDbContext<ElsewedySchoolSysDbDevContext>(options =>
                 options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+                
+            // Add Memory Cache for performance
+            builder.Services.AddMemoryCache();
+                
+               
+
 
             // Remove ASP.NET Identity; authenticate directly against Account/AccountRole/Role tables
 
@@ -53,8 +64,8 @@ namespace QuizesApi
             {
                 options.AddPolicy("StudentOnly", policy => policy.RequireRole("Student"));
                 options.AddPolicy("TeacherOnly", policy => policy.RequireRole("Teacher"));
-                options.AddPolicy("SuperadminOnly", policy => policy.RequireRole("Superadmin", "Admin"));
-                options.AddPolicy("TeacherOrAdmin", policy => policy.RequireRole("Teacher", "Superadmin", "Admin"));
+                options.AddPolicy("SuperadminOnly", policy => policy.RequireRole("Superadmin", "Admin", "Board"));
+                options.AddPolicy("TeacherOrAdmin", policy => policy.RequireRole("Teacher", "Superadmin", "Admin", "Board"));
             });
 
             // Add CORS
@@ -63,7 +74,7 @@ namespace QuizesApi
                 options.AddPolicy("AllowFrontend",
                     policy =>
                     {
-                        policy.WithOrigins("http://localhost:5173") 
+                        policy.AllowAnyOrigin()
                               .AllowAnyHeader()
                               .AllowAnyMethod();
                     });
@@ -83,7 +94,7 @@ namespace QuizesApi
                 app.UseSwaggerUI();
             }
 
-            app.UseHttpsRedirection();
+            // app.UseHttpsRedirection();
 
             app.UseCors("AllowFrontend"); 
 
@@ -95,7 +106,7 @@ namespace QuizesApi
             // Seed roles and test accounts
             using (var scope = app.Services.CreateScope())
             {
-                var db = scope.ServiceProvider.GetRequiredService<ElsewedySchoolContext>();
+                var db = scope.ServiceProvider.GetRequiredService<ElsewedySchoolSysDbDevContext>();
                 Models.ElsewedySchoolContextSeed.SeedAsync(db).GetAwaiter().GetResult();
             }
 

@@ -10,7 +10,24 @@ public class StudentDashboardDto
     public double FailPercentage { get; set; }
     public LeaderboardDto? LatestExamLeaderboard { get; set; }
     public int? StudentRankInLatestExam { get; set; }
-    public List<ExamSelectionDto> RecentExams { get; set; } = new();
+    public List<StudentRecentExamDto> RecentExams { get; set; } = new();
+    public List<ChartDataPointDto> ScoreDistribution { get; set; } = new();
+}
+
+public class ChartDataPointDto
+{
+    public string Name { get; set; } = string.Empty;
+    public double Value { get; set; }
+}
+
+public class StudentRecentExamDto
+{
+    public long ExamId { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string? SubjectName { get; set; }
+    public double? StudentScore { get; set; }
+    public double? AverageScore { get; set; }
+    public DateTime Date { get; set; }
 }
 
 // Teacher Dashboard Response
@@ -25,6 +42,7 @@ public class TeacherDashboardDto
     public List<ExamStatsDto> ExamBreakdown { get; set; } = new();
     public LeaderboardDto? LatestExamLeaderboard { get; set; }
     public List<ExamSelectionDto> RecentExams { get; set; } = new();
+    public List<ChartDataPointDto> ScoreDistribution { get; set; } = new();
 }
 
 public class ExamSelectionDto
@@ -44,6 +62,9 @@ public class SuperadminDashboardDto
     public List<LeaderboardEntryDto> TopPerformingStudents { get; set; } = new();
     public List<TopTeacherDto> TopPerformingTeachers { get; set; } = new();
     public List<RecentActivityDto> RecentActivity { get; set; } = new();
+    public List<ExamSelectionDto> RecentExams { get; set; } = new();
+    public List<ChartDataPointDto> ScoreDistribution { get; set; } = new();
+    public List<ExamStatsDto> ExamBreakdown { get; set; } = new();
 }
 
 // Leaderboard Response
@@ -51,6 +72,7 @@ public class LeaderboardDto
 {
     public long ExamId { get; set; }
     public string ExamTitle { get; set; } = string.Empty;
+    public string? SubjectName { get; set; }
     public List<LeaderboardEntryDto> TopStudents { get; set; } = new();
     public List<LeaderboardEntryDto> HighlightedStudents { get; set; } = new(); // Top 3 highest scores
     public int TotalParticipants { get; set; }
@@ -72,6 +94,7 @@ public class ExamStatsDto
 {
     public long ExamId { get; set; }
     public string ExamTitle { get; set; } = string.Empty;
+    public string? SubjectName { get; set; }
     public int TotalStudents { get; set; }
     public int PassedStudents { get; set; }
     public int FailedStudents { get; set; }
@@ -95,6 +118,7 @@ public class StudentPerformanceDto
 {
     public long Id { get; set; }
     public string Name { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
     public string Initials { get; set; } = string.Empty;
     public string Grade { get; set; } = string.Empty;
     public string Class { get; set; } = string.Empty;
@@ -115,6 +139,30 @@ public class LeaderboardFilterDto
 {
     public long? GradeId { get; set; }
     public long? ClassId { get; set; }
+    public long? ExamId { get; set; }
+    public long? SubjectId { get; set; }
+    public string? SearchTerm { get; set; }
     public DateTime? StartDate { get; set; }
     public DateTime? EndDate { get; set; }
+    public string GroupBy { get; set; } = "Student"; // "Student" or "Class"
+}
+// Teacher Account Information for Superadmin
+public class TeacherAccountDto
+{
+    public long Id { get; set; }
+    public string FullNameEn { get; set; } = string.Empty;
+    public string FullNameAr { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public bool IsActive { get; set; }
+    public int TotalExams { get; set; }
+}
+
+public class TeacherPerformanceDto
+{
+    public long Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Initials { get; set; } = string.Empty;
+    public string Grade { get; set; } = string.Empty;
+    public string Class { get; set; } = string.Empty;
+    public Dictionary<string, double> QuizScores { get; set; } = new();
 }

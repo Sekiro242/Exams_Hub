@@ -1,19 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace QuizesApi.Models;
 
 public partial class QuestionBank
 {
-    public long AccountId { get; set; }
-    public string? BankKey { get; set; }
-
-    public string? BankTitle { get; set; }
-
-    public string? BankDescription { get; set; }
-
-    public string? Grade { get; set; }
-
     public long QuestionId { get; set; }
 
     public string? QuestionTitle { get; set; }
@@ -42,7 +34,13 @@ public partial class QuestionBank
 
     public decimal? Mark { get; set; }
 
-    public ICollection<ExamQuestionBank> ExamQuestionBanks { get; set; } = new List<ExamQuestionBank>();
+    public long? AccountId { get; set; }
+    public long? GradeId { get; set; }
 
+    [NotMapped]
+    public long? ClassId { get; set; }
 
+    public string? BankDescription { get; set; }
+    public string? BankKey { get; set; }
+    public string? BankTitle { get; set; }
 }

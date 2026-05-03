@@ -33,4 +33,13 @@ public interface IDashboardRepo
     /// Get all students with their performance data
     /// </summary>
     Task<List<StudentPerformanceDto>> GetStudentsAsync();
+
+    /// <summary>
+    /// Get combined leaderboard for a specific grade (aggregated scores from all exams)
+    /// </summary>
+    Task<LeaderboardDto> GetCombinedLeaderboardAsync(LeaderboardFilterDto? filters);
+    /// <summary>
+    /// Get all teachers with their account data
+    /// </summary>
+    Task<List<TeacherAccountDto>> GetTeachersAsync();
 }

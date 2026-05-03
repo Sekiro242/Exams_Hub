@@ -9,19 +9,18 @@ public partial class StudentExamAnswer
 
     public long AccountId { get; set; }
 
-    public long ExamId { get; set; }
-
-    public long QuestionId { get; set; }
+    public long? ExamQuestionId { get; set; }
+    public long? ExamDetailsId { get; set; }
 
     public string ChoosedAnswer { get; set; } = null!;
 
     public bool Score { get; set; }
 
+    public long? QuestionBankId { get; set; }
+
     public virtual Account Account { get; set; } = null!;
 
-    // Note: ExamId should reference ExamDetail, but the FK constraint points to ExamQuestion
-    // We'll keep the navigation property but won't use it in the context configuration
-    // public virtual ExamQuestion Exam { get; set; } = null!;
+    public virtual ExamDetail? ExamDetailNav { get; set; }
 
-    public virtual QuestionBank Question { get; set; } = null!;
+    public virtual QuestionBank? QuestionBank { get; set; }
 }
